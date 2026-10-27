@@ -1,0 +1,228 @@
+// Published prices for the cost simulator. They come from pricing pages, not APIs, so
+// every sheet records its source and the day it was checked. All amounts are USD.
+
+export type Service = "supabase" | "upstash" | "vercel" | "cloudflare";
+
+export const SERVICES: Service[] = ["supabase", "upstash", "vercel", "cloudflare"];
+
+export const SERVICE_LABELS: Record<Service, string> = {
+  supabase: "Supabase",
+  upstash: "Upstash Redis",
+  vercel: "Vercel",
+  cloudflare: "Cloudflare",
+};
+
+export const COMPUTE_KEYS = ["nano", "micro", "small", "medium", "large", "xl", "2xl", "4xl", "8xl", "12xl", "16xl"] as const;
+export type ComputeKey = (typeof COMPUTE_KEYS)[number];
+
+export interface ComputeSize {
+  key: ComputeKey;
+  label: string;
+  monthlyPrice: number;
+  cpu: string;
+  ramGB: number;
+  maxDirectConnections: number;
+  maxPoolerConnections: number;
+  /** Assumption, not a published figure: Supabase does not publish query throughput. */
+  planningQps: number;
+}
+
+export interface PriceItem {
+  key: string;
+  label: string;
+  unit: string;
+  includedQuantity: number;
+  /** null: going over the included quantity is a restriction on this plan, not a charge. */
+  unitPrice: number | null;
+  /** Price applies per this many units. */
+  unitSize: number;
+  billingMode: "per_unit" | "package";
+  note?: string;
+}
+
+export interface PriceSheet {
+  service: Service;
+  plan: string;
+  label: string;
+  version: string;
+  verifiedAt: string; // YYYY-MM-DD
+  sourceUrl: string;
+  baseFee: number;
+  perSeat?: boolean;
+  /** Monthly credit offsetting the listed items (never the base fee). */
+  credit?: { amount: number; appliesTo: string[] };
+  items: PriceItem[];
+}
+
+export interface Catalog {
+  sheets: PriceSheet[];
+  /** Ascending by price. */
+  compute: ComputeSize[];
+  /** The only size available on Supabase Free. */
+  freeCompute: ComputeKey;
+}
+
+function item(key: string, label: string, unit: string, includedQuantity: number, unitPrice: number | null, unitSize = 1, note?: string): PriceItem {
+  return { key, label, unit, includedQuantity, unitPrice, unitSize, billingMode: "per_unit", ...(note ? { note } : {}) };
+}
+
+const VERSION = "2026-10";
+// Set each of these to the day its values were checked against the source (Task 3).
+const SUPABASE_VERIFIED = "2026-10-27";
+const UPSTASH_VERIFIED = "2026-10-27";
+const VERCEL_VERIFIED = "2026-10-27";
+const CLOUDFLARE_VERIFIED = "2026-10-27";
+
+const SUPABASE_PAID_ITEMS: PriceItem[] = [
+  item("mau", "Monthly active users", "users", 100_000, 0.00325),
+  item("db_disk_gb", "Database disk", "GB", 8, 0.125),
+  item("storage_gb", "File storage", "GB", 100, 0.021),
+  item("egress_gb", "Egress", "GB", 250, 0.09),
+  item("fn_invocations", "Edge Function invocations", "calls", 2_000_000, 2, 1_000_000),
+  item("rt_peak", "Realtime peak connections", "connections", 500, 10, 1_000),
+  item("rt_messages", "Realtime messages", "messages", 5_000_000, 2.5, 1_000_000),
+];
+
+const R2_ITEMS: PriceItem[] = [
+  item("r2_storage_gb", "R2 storage", "GB", 10, 0.015),
+  item("r2_class_a", "R2 Class A operations (writes)", "ops", 1_000_000, 4.5, 1_000_000),
+  item("r2_class_b", "R2 Class B operations (reads)", "ops", 10_000_000, 0.36, 1_000_000, "R2 egress is free."),
+];
+
+export const CATALOG: Catalog = {
+  freeCompute: "nano",
+  compute: [
+    { key: "nano", label: "Nano", monthlyPrice: 0, cpu: "Shared", ramGB: 0.5, maxDirectConnections: 60, maxPoolerConnections: 200, planningQps: 50 },
+    { key: "micro", label: "Micro", monthlyPrice: 10, cpu: "2-core ARM (shared)", ramGB: 1, maxDirectConnections: 60, maxPoolerConnections: 200, planningQps: 100 },
+    { key: "small", label: "Small", monthlyPrice: 15, cpu: "2-core ARM (shared)", ramGB: 2, maxDirectConnections: 90, maxPoolerConnections: 400, planningQps: 200 },
+    { key: "medium", label: "Medium", monthlyPrice: 60, cpu: "2-core ARM (shared)", ramGB: 4, maxDirectConnections: 120, maxPoolerConnections: 600, planningQps: 400 },
+    { key: "large", label: "Large", monthlyPrice: 110, cpu: "2-core ARM (dedicated)", ramGB: 8, maxDirectConnections: 160, maxPoolerConnections: 800, planningQps: 800 },
+    { key: "xl", label: "XL", monthlyPrice: 210, cpu: "4-core ARM", ramGB: 16, maxDirectConnections: 240, maxPoolerConnections: 1_000, planningQps: 1_500 },
+    { key: "2xl", label: "2XL", monthlyPrice: 410, cpu: "8-core ARM", ramGB: 32, maxDirectConnections: 380, maxPoolerConnections: 1_500, planningQps: 3_000 },
+    { key: "4xl", label: "4XL", monthlyPrice: 960, cpu: "16-core ARM", ramGB: 64, maxDirectConnections: 480, maxPoolerConnections: 3_000, planningQps: 6_000 },
+    { key: "8xl", label: "8XL", monthlyPrice: 1_870, cpu: "32-core ARM", ramGB: 128, maxDirectConnections: 490, maxPoolerConnections: 6_000, planningQps: 12_000 },
+    { key: "12xl", label: "12XL", monthlyPrice: 2_800, cpu: "48-core ARM", ramGB: 192, maxDirectConnections: 500, maxPoolerConnections: 9_000, planningQps: 18_000 },
+    { key: "16xl", label: "16XL", monthlyPrice: 3_730, cpu: "64-core ARM", ramGB: 256, maxDirectConnections: 500, maxPoolerConnections: 12_000, planningQps: 24_000 },
+  ],
+  sheets: [
+    {
+      service: "supabase",
+      plan: "free",
+      label: "Supabase Free",
+      version: VERSION,
+      verifiedAt: SUPABASE_VERIFIED,
+      sourceUrl: "https://supabase.com/pricing",
+      baseFee: 0,
+      items: [
+        item("mau", "Monthly active users", "users", 50_000, null),
+        item("db_disk_gb", "Database size", "GB", 0.5, null, 1, "The database turns read-only above this size."),
+        item("storage_gb", "File storage", "GB", 1, null),
+        item("egress_gb", "Egress", "GB", 5, null),
+        item("fn_invocations", "Edge Function invocations", "calls", 500_000, null),
+        item("rt_peak", "Realtime peak connections", "connections", 200, null),
+        item("rt_messages", "Realtime messages", "messages", 2_000_000, null),
+      ],
+    },
+    {
+      service: "supabase",
+      plan: "pro",
+      label: "Supabase Pro",
+      version: VERSION,
+      verifiedAt: SUPABASE_VERIFIED,
+      sourceUrl: "https://supabase.com/pricing",
+      baseFee: 25,
+      credit: { amount: 10, appliesTo: ["compute"] },
+      items: SUPABASE_PAID_ITEMS,
+    },
+    {
+      service: "supabase",
+      plan: "team",
+      label: "Supabase Team",
+      version: VERSION,
+      verifiedAt: SUPABASE_VERIFIED,
+      sourceUrl: "https://supabase.com/pricing",
+      baseFee: 599,
+      credit: { amount: 10, appliesTo: ["compute"] },
+      items: SUPABASE_PAID_ITEMS,
+    },
+    {
+      service: "upstash",
+      plan: "payg",
+      label: "Upstash Redis pay as you go",
+      version: VERSION,
+      verifiedAt: UPSTASH_VERIFIED,
+      sourceUrl: "https://upstash.com/pricing/redis",
+      baseFee: 0,
+      items: [item("commands", "Commands", "commands", 0, 0.2, 100_000), item("storage_gb", "Storage", "GB", 0, 0.25)],
+    },
+    {
+      service: "vercel",
+      plan: "hobby",
+      label: "Vercel Hobby",
+      version: VERSION,
+      verifiedAt: VERCEL_VERIFIED,
+      sourceUrl: "https://vercel.com/pricing",
+      baseFee: 0,
+      items: [
+        item("edge_requests", "Edge requests", "requests", 1_000_000, null, 1, "Hobby is for non-commercial use."),
+        item("fn_invocations", "Function invocations", "calls", 1_000_000, null),
+        item("cpu_hours", "Active CPU", "hours", 4, null),
+        item("transfer_gb", "Fast data transfer", "GB", 100, null),
+      ],
+    },
+    {
+      service: "vercel",
+      plan: "pro",
+      label: "Vercel Pro",
+      version: VERSION,
+      verifiedAt: VERCEL_VERIFIED,
+      sourceUrl: "https://vercel.com/pricing",
+      baseFee: 20,
+      perSeat: true,
+      credit: { amount: 20, appliesTo: ["edge_requests", "fn_invocations", "cpu_hours", "transfer_gb"] },
+      items: [
+        item("edge_requests", "Edge requests", "requests", 10_000_000, 2, 1_000_000),
+        item("fn_invocations", "Function invocations", "calls", 1_000_000, 0.6, 1_000_000),
+        item("cpu_hours", "Active CPU", "hours", 0, 0.128),
+        item("transfer_gb", "Fast data transfer", "GB", 1_000, 0.15),
+      ],
+    },
+    {
+      service: "cloudflare",
+      plan: "free",
+      label: "Cloudflare Workers Free",
+      version: VERSION,
+      verifiedAt: CLOUDFLARE_VERIFIED,
+      sourceUrl: "https://developers.cloudflare.com/workers/platform/pricing/",
+      baseFee: 0,
+      items: [
+        item("requests", "Workers requests", "requests", 3_000_000, null, 1, "100,000 a day, shown per month. Each request is limited to 10 ms CPU."),
+        ...R2_ITEMS,
+      ],
+    },
+    {
+      service: "cloudflare",
+      plan: "paid",
+      label: "Cloudflare Workers Paid",
+      version: VERSION,
+      verifiedAt: CLOUDFLARE_VERIFIED,
+      sourceUrl: "https://developers.cloudflare.com/workers/platform/pricing/",
+      baseFee: 5,
+      items: [
+        item("requests", "Workers requests", "requests", 10_000_000, 0.3, 1_000_000),
+        item("cpu_ms", "Workers CPU time", "ms", 30_000_000, 0.02, 1_000_000),
+        ...R2_ITEMS,
+      ],
+    },
+  ],
+};
+
+export function sheetFor(catalog: Catalog, service: Service, plan: string): PriceSheet | undefined {
+  return catalog.sheets.find((s) => s.service === service && s.plan === plan);
+}
+
+export function computeSize(catalog: Catalog, key: ComputeKey): ComputeSize {
+  const size = catalog.compute.find((c) => c.key === key);
+  if (!size) throw new Error(`Unknown compute size ${key}`);
+  return size;
+}
