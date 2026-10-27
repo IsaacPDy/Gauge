@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { CATALOG, COMPUTE_KEYS, type ComputeKey } from "./catalog";
 
 export const PRESETS = ["side_project", "small_saas", "consumer_app"] as const;
@@ -68,7 +67,7 @@ export const FIELD_GROUPS: { key: Exclude<FieldGroup, "stack">; label: string }[
   { key: "assumptions", label: "Assumptions" },
 ];
 
-type NumberKey = { [K in keyof SimInputs]-?: SimInputs[K] extends number | null ? K : never }[keyof SimInputs];
+export type NumberKey = { [K in keyof SimInputs]-?: SimInputs[K] extends number | null ? K : never }[keyof SimInputs];
 export type EnumKey = "supabase" | "compute" | "cache" | "vercel" | "cloudflare" | "host" | "fileStore";
 
 export interface NumberField {
@@ -135,10 +134,10 @@ export const NUMBER_FIELDS: NumberField[] = [
   num("fileDownloadMBPerUser", "fdl", "File downloads per user", "data", 0, 100_000, 0.1, { unit: "MB/mo" }),
   num("growthPct", "g", "Monthly MAU growth", "growth", -50, 200, 1, { unit: "%" }),
   num("headroomPct", "hr", "Compute headroom", "assumptions", 10, 100, 5, { unit: "%", hint: "highest share of capacity to use" }),
-  num("queryMs", "qms", "Average query time", "assumptions", 0.1, 10_000, 0.5, { unit: "ms" }),
+  num("queryMs", "qms", "Average query time", "assumptions", 0.1, 10_000, 0.1, { unit: "ms" }),
   num("cachedKeysPct", "ck", "Data held in cache", "assumptions", 0, 100, 1, { unit: "%" }),
-  num("cacheValueKB", "cvk", "Cache value size", "assumptions", 0.01, 100_000, 0.1, { unit: "KB" }),
-  num("avgFileMB", "fsz", "Average file size", "assumptions", 0.001, 100_000, 0.1, { unit: "MB" }),
+  num("cacheValueKB", "cvk", "Cache value size", "assumptions", 0.01, 100_000, 0.01, { unit: "KB" }),
+  num("avgFileMB", "fsz", "Average file size", "assumptions", 0.001, 100_000, 0.001, { unit: "MB" }),
 ];
 
 const FIELDS = [...ENUM_FIELDS, ...NUMBER_FIELDS];
@@ -247,14 +246,21 @@ export function clampField(field: NumberField, n: number): number {
   return field.integer ? Math.round(v) : v;
 }
 
+export function clampQps(n: number): number {
+  return Math.min(QPS_MAX, Math.max(1, n));
+}
+
 type Params = Record<string, string | string[] | undefined>;
 
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
+/** Echoes URL text in notices without letting a crafted link write a paragraph. */
+const quote = (s: string) => (s.length > 40 ? `${s.slice(0, 40)}…` : s);
+
 function parseNumber(raw: string): number | null {
   if (raw.trim() === "") return null;
-  const parsed = z.coerce.number().safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 function setValue(inputs: SimInputs, name: EnumKey | NumberKey, value: unknown) {
@@ -268,7 +274,7 @@ export function decode(params: Params): { inputs: SimInputs; notices: string[] }
   let preset = DEFAULT_PRESET;
   if (p !== undefined) {
     if ((PRESETS as readonly string[]).includes(p)) preset = p as PresetKey;
-    else notices.push(`Unknown preset "${p}", so ${PRESET_INFO[DEFAULT_PRESET].label} is used.`);
+    else notices.push(`Unknown preset "${quote(p)}", so ${PRESET_INFO[DEFAULT_PRESET].label} is used.`);
   }
   const inputs = presetInputs(preset);
 
@@ -280,16 +286,16 @@ export function decode(params: Params): { inputs: SimInputs; notices: string[] }
       const size = key.slice(4);
       const n = parseNumber(raw);
       if (!(COMPUTE_KEYS as readonly string[]).includes(size) || n === null) {
-        notices.push(`Ignored the setting "${key}".`);
+        notices.push(`Ignored the setting "${quote(key)}".`);
         continue;
       }
-      inputs.planningQps[size as ComputeKey] = Math.min(QPS_MAX, Math.max(1, n));
+      inputs.planningQps[size as ComputeKey] = clampQps(n);
       continue;
     }
 
     const field = FIELD_BY_URL.get(key);
     if (!field) {
-      notices.push(`Ignored the unknown setting "${key}".`);
+      notices.push(`Ignored the unknown setting "${quote(key)}".`);
       continue;
     }
     if (field.kind === "enum") {

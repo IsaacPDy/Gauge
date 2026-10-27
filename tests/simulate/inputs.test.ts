@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampField, decode, encode, NUMBER_FIELDS, presetInputs } from "@/lib/engine/simulate/inputs";
+import { clampField, decode, encode, NUMBER_FIELDS, PRESETS, presetInputs } from "@/lib/engine/simulate/inputs";
 
 const params = (q: string) => Object.fromEntries(new URLSearchParams(q));
 
@@ -13,12 +13,24 @@ describe("presets", () => {
   });
 
   it("keeps every preset value inside its field range", () => {
-    for (const p of ["side_project", "small_saas", "consumer_app"] as const) {
+    for (const p of PRESETS) {
       const inputs = presetInputs(p);
       for (const f of NUMBER_FIELDS) {
         const v = inputs[f.name];
         if (v === null) continue;
         expect(clampField(f, v)).toBe(v);
+      }
+    }
+  });
+
+  it("keeps every preset value on its field's step grid", () => {
+    for (const p of PRESETS) {
+      const inputs = presetInputs(p);
+      for (const f of NUMBER_FIELDS) {
+        const v = inputs[f.name];
+        if (v === null) continue;
+        const steps = (v - f.min) / f.step;
+        expect(Math.abs(steps - Math.round(steps)), `${p}.${f.name}`).toBeLessThan(1e-6);
       }
     }
   });
@@ -66,6 +78,12 @@ describe("decode", () => {
 
   it("uses the first value of a repeated key", () => {
     expect(decode({ mau: ["5", "6"] }).inputs.mau).toBe(5);
+  });
+
+  it("truncates long unknown keys in notices", () => {
+    const { notices } = decode({ ["x".repeat(100)]: "1" });
+    expect(notices[0]).toContain(`${"x".repeat(40)}…`);
+    expect(notices[0]).not.toContain("x".repeat(41));
   });
 });
 
