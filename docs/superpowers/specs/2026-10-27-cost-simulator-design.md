@@ -211,7 +211,6 @@ interface PriceItem {
   unitPrice: number | null;
   unitSize: number;
   billingMode: "per_unit" | "package";
-  tiers?: { upTo: number | null; unitPrice: number }[];  // graduated pricing, if any
 }
 ```
 
@@ -259,7 +258,9 @@ interface LineItem {
 }
 ```
 
-- Graduated tiers are summed band by band. A single-rate item reuses `overageCost()`.
+- Every item has a single rate above its included quantity and reuses `overageCost()`.
+  Graduated (volume) tiers are deferred: no priced item uses them today. If a verified
+  price turns out to be tiered, add tier support then rather than flattening the price.
 - Items with `unitPrice: null` never cost money. When usage passes the included
   amount, `restricted` is set. This is how Free and Hobby plans are modelled.
 - Disabled services produce no line items.
