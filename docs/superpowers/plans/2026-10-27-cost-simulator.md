@@ -2019,9 +2019,11 @@ import { type Catalog, type ComputeKey, type ComputeSize, type Service, sheetFor
 import { formatAmount, formatQps } from "./format";
 import type { SimInputs } from "./inputs";
 import { enabledPlans, type LineItem, priceMonth } from "./price";
-import { DIRECT_REASON, type ResolvedStack } from "./stack";
+import { DIRECT_REASON, NO_SUPABASE_REASON, type ResolvedStack } from "./stack";
 import { type MonthUsage, workloadMonths } from "./workload";
 ```
+
+(Keep any other names the file already imports, such as `computeSize` from `./catalog`; merge rather than replace.)
 
 Then append to the end of the file:
 
@@ -2126,7 +2128,7 @@ export function collectEvents(months: MonthResult[], verdict: CacheVerdict, stac
       month: verdict.paysOffMonth,
       kind: "cache_pays_off",
       service: "upstash",
-      message: "From this month a cache costs less than the compute or egress it saves.",
+      message: "From this month a cache is the better option: it costs less than it saves, or it's needed to keep up with load.",
     });
   }
   return events.sort((a, b) => a.month - b.month);
