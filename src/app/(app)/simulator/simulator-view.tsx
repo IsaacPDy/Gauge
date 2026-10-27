@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Notice } from "@/components/ui";
 import { simulate } from "@/lib/engine/simulate";
 import { encode, type PresetKey, presetInputs, type SimInputs } from "@/lib/engine/simulate/inputs";
+import { SimulatorForm } from "./simulator-form";
 
 export function SimulatorView({ initialInputs, initialNotices }: { initialInputs: SimInputs; initialNotices: string[] }) {
   const [inputs, setInputs] = useState(initialInputs);
@@ -39,8 +40,7 @@ export function SimulatorView({ initialInputs, initialNotices }: { initialInputs
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:items-start">
       <div className="min-w-0">
-        {/* Replaced by <SimulatorForm> in Task 12. */}
-        <pre className="text-xs">{JSON.stringify({ edited, preset: inputs.preset, choosePreset: typeof choosePreset, change: typeof change }, null, 2)}</pre>
+        <SimulatorForm inputs={inputs} edited={edited} onChange={change} onPreset={choosePreset} />
       </div>
       <div className="flex min-w-0 flex-col gap-4">
         {notices.length > 0 ? (
