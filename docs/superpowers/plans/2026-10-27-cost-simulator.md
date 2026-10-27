@@ -1683,7 +1683,9 @@ import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
 import type { SimInputs } from "@/lib/engine/simulate/inputs";
 
 const MONTH = 2_592_000;
-const atQps = (qps: number, extra: Partial<SimInputs> = {}) => inputsWith({ dbQueriesOverride: qps * MONTH, peakToAvg: 1, growthPct: 0, ...extra });
+// No file downloads, so Supabase egress stays inside Pro's allowance and only compute decides the verdict.
+const atQps = (qps: number, extra: Partial<SimInputs> = {}) =>
+  inputsWith({ dbQueriesOverride: qps * MONTH, peakToAvg: 1, growthPct: 0, fileDownloadMBPerUser: 0, ...extra });
 
 function verdict(inputs: SimInputs, catalog = TEST_CATALOG) {
   return cacheVerdict(inputs, resolveStack(inputs).stack, catalog, 12);
@@ -1916,7 +1918,9 @@ import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
 
 const NOW = new Date("2026-10-27T12:00:00Z");
 const run = (inputs: SimInputs, catalog = TEST_CATALOG) => simulate(inputs, { catalog, now: NOW });
-const atQps = (qps: number, extra: Partial<SimInputs> = {}) => inputsWith({ dbQueriesOverride: qps * 2_592_000, peakToAvg: 1, growthPct: 0, ...extra });
+// No file downloads, so Supabase egress stays inside Pro's allowance and only compute decides the verdict.
+const atQps = (qps: number, extra: Partial<SimInputs> = {}) =>
+  inputsWith({ dbQueriesOverride: qps * 2_592_000, peakToAvg: 1, growthPct: 0, fileDownloadMBPerUser: 0, ...extra });
 
 describe("simulate", () => {
   it("produces 12 finite, non-negative months for every preset with the real catalog", () => {
