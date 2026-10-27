@@ -1,15 +1,22 @@
-import type { ComputeKey } from "./catalog";
-import { type FileStore, type Host, HOST_LABELS, HOSTS, type SimInputs } from "./inputs";
+import {
+  type CloudflareChoice,
+  type FileStore,
+  type Host,
+  HOSTS,
+  type SimInputs,
+  type SupabaseChoice,
+  type VercelChoice,
+} from "./inputs";
 
 export interface ResolvedStack {
-  supabase: "free" | "pro" | "team" | null;
-  compute: "auto" | ComputeKey;
+  supabase: Exclude<SupabaseChoice, "off"> | null;
+  compute: SimInputs["compute"];
   /** Whether the cache is priced. */
   cache: boolean;
   cacheBlockedReason: string | null;
-  vercel: "hobby" | "pro" | null;
+  vercel: Exclude<VercelChoice, "off"> | null;
   seats: number;
-  cloudflare: "free" | "paid" | null;
+  cloudflare: Exclude<CloudflareChoice, "off"> | null;
   host: Host;
   fileStore: FileStore;
 }
@@ -17,6 +24,17 @@ export interface ResolvedStack {
 export const DIRECT_REASON =
   "A cache needs a server-side API host (Vercel or Cloudflare). With the client calling Supabase directly there is nowhere to put one.";
 export const NO_SUPABASE_REASON = "The cache is modelled in front of a Supabase database. Turn on Supabase to price it.";
+
+const HOST_OFF: Record<Host, string> = {
+  vercel: "Vercel is turned off",
+  cloudflare: "Cloudflare is turned off",
+  direct: "Supabase is turned off",
+};
+const HOST_NOW: Record<Host, string> = {
+  vercel: "the API runs on Vercel",
+  cloudflare: "the API runs on Cloudflare Workers",
+  direct: "the client calls Supabase directly",
+};
 
 /** Applies the routing rules so every mix of services is coherent. */
 export function resolveStack(inputs: SimInputs): { stack: ResolvedStack; notices: string[] } {
@@ -29,13 +47,18 @@ export function resolveStack(inputs: SimInputs): { stack: ResolvedStack; notices
   let host = inputs.host;
   if (!hostOn[host]) {
     host = HOSTS.find((h) => hostOn[h]) ?? "direct";
-    if (host !== inputs.host) notices.push(`${HOST_LABELS[inputs.host]} is turned off, so the API host is ${HOST_LABELS[host]}.`);
+    // With nothing on at all the page shows an empty state, so no notice is needed.
+    if (hostOn[host]) notices.push(`${HOST_OFF[inputs.host]}, so ${HOST_NOW[host]}.`);
   }
 
   let fileStore = inputs.fileStore;
   if (fileStore === "r2" && cloudflare === null) {
     fileStore = "supabase";
-    notices.push("R2 file storage needs Cloudflare, so Supabase Storage is used.");
+    notices.push(
+      supabase !== null
+        ? "R2 file storage needs Cloudflare, so Supabase Storage is used."
+        : "R2 file storage needs Cloudflare, and Supabase is off, so file storage isn't priced.",
+    );
   }
 
   let cache = inputs.cache !== "off";
