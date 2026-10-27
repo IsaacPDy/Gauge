@@ -201,7 +201,7 @@ export const CATALOG: Catalog = {
           1_000_000,
           2,
           1_000_000,
-          "Included by Pro's free Flat Rate CDN tier (1M requests, 1 TB transfer). Above it Vercel moves you to a paid tier the next cycle: $20/mo for 10M, $100/mo for 50M, $300/mo for 150M. The price shown is the on-demand rate in iad1, charged from the first request if Flat Rate CDN is off.",
+          "Pro's free Flat Rate CDN tier covers 1M requests and 1 TB transfer. Above it Vercel moves you to a paid tier the next cycle ($20/mo for 10M, $100/mo for 50M, $300/mo for 150M). Each tier works out to $2 per million, so this estimate charges $2 per million above 1M rather than stepping between tiers.",
         ),
         item("fn_invocations", "Function invocations", "calls", 0, 0.6, 1_000_000, "Pro has no included invocations; the usage credit offsets them."),
         item("cpu_hours", "Active CPU", "hours", 0, 0.128, 1, "Rate in iad1 (also cle1, pdx1). Other regions cost up to $0.221 per hour."),

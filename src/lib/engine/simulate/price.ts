@@ -47,7 +47,7 @@ function usageFor(service: Service, u: MonthUsage, stack: ResolvedStack): Record
     case "vercel": {
       const host = stack.host === "vercel";
       return {
-        edge_requests: host ? u.requests : 0,
+        edge_requests: host ? u.serverRequests : 0,
         fn_invocations: host ? u.serverRequests : 0,
         cpu_hours: host ? u.cpuMs / 3_600_000 : 0,
         transfer_gb: host ? u.hostEgressGB : 0,
@@ -67,6 +67,9 @@ function usageFor(service: Service, u: MonthUsage, stack: ResolvedStack): Record
   }
 }
 
+/** Drops float noise (e.g. 3000000.0000000005) so it can't tip a value into another billing package. */
+const tidy = (n: number) => Number(n.toPrecision(12));
+
 function fixed(service: Service, key: string, label: string, cost: number): LineItem {
   return { service, key, label, unit: "", usage: 1, included: 0, billable: 1, cost, restricted: false };
 }
@@ -82,8 +85,9 @@ function priceSheet(sheet: PriceSheet, usage: Record<string, number>, compute: C
     items.push(fixed(sheet.service, "compute", `${size.label} compute`, size.monthlyPrice));
   }
   for (const item of sheet.items) {
-    const used = usage[item.key] ?? 0;
+    const used = tidy(usage[item.key] ?? 0);
     const billable = Math.max(0, used - item.includedQuantity);
+    const keysNote = sheet.service === "upstash" && item.key === "storage_gb" && u.cacheKeys > 0 ? `About ${formatCount(u.cacheKeys)} keys.` : undefined;
     items.push({
       service: sheet.service,
       key: item.key,
@@ -94,7 +98,7 @@ function priceSheet(sheet: PriceSheet, usage: Record<string, number>, compute: C
       billable,
       cost: item.unitPrice === null ? 0 : overageCost(used, { ...item, unitPrice: item.unitPrice }),
       restricted: item.unitPrice === null && billable > 0,
-      note: sheet.service === "upstash" && item.key === "storage_gb" ? `About ${formatCount(u.cacheKeys)} keys.` : item.note,
+      note: [item.note, keysNote].filter(Boolean).join(" ") || undefined,
     });
   }
   if (sheet.credit) {

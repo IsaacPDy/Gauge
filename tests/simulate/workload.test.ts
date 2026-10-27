@@ -74,6 +74,12 @@ describe("workloadMonths", () => {
     expect(m1.cpuMs).toBe(0);
   });
 
+  it("has no cache traffic behind a direct host even when asked", () => {
+    const [m1] = workloadMonths(inputsWith({ host: "direct" }), stackWith({ host: "direct" }), true, 1);
+    expect(m1.cacheHits).toBe(0);
+    expect(m1.cacheCommands).toBe(0);
+  });
+
   it("returns zero egress share, never NaN, without DB queries", () => {
     const [m1] = workloadMonths(inputsWith({ queriesPerRequest: 0 }), stackWith(), false, 1);
     expect(m1.supabaseEgressGB).toBe(0);

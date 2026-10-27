@@ -76,3 +76,26 @@ export function zeroUsage(overrides: Partial<MonthUsage> = {}): MonthUsage {
     ...overrides,
   };
 }
+
+/** Extra items for routing and unit-conversion tests in price.test.ts. Round numbers on purpose. */
+export const ROUTING_CATALOG: Catalog = {
+  ...TEST_CATALOG,
+  sheets: [
+    ...TEST_CATALOG.sheets.filter((s) => s.service !== "vercel" && s.service !== "cloudflare"),
+    { ...sheet, service: "vercel", plan: "pro", label: "Vercel Pro", sourceUrl: "https://example.test/vc", baseFee: 0, items: [per("edge_requests", 0, 1, 1_000_000), per("cpu_hours", 0, 1)] },
+    {
+      ...sheet,
+      service: "cloudflare",
+      plan: "paid",
+      label: "Cloudflare Paid",
+      sourceUrl: "https://example.test/cf",
+      baseFee: 0,
+      items: [
+        per("cpu_ms", 0, 1, 1_000_000),
+        per("r2_storage_gb", 0, 1),
+        { ...per("r2_class_a", 1_000_000, 4.5, 1_000_000), billingMode: "package" as const },
+        { ...per("r2_class_b", 0, 1, 1_000_000) },
+      ],
+    },
+  ],
+};
