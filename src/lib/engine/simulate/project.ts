@@ -1,9 +1,9 @@
 import { formatMoney } from "../../units";
 import { round2 } from "../cost";
-import { type Catalog, type ComputeKey, type ComputeSize, computeSize } from "./catalog";
-import { formatQps } from "./format";
+import { type Catalog, type ComputeKey, type ComputeSize, computeSize, type Service, sheetFor } from "./catalog";
+import { formatAmount, formatQps } from "./format";
 import type { SimInputs } from "./inputs";
-import { type LineItem, priceMonth } from "./price";
+import { enabledPlans, type LineItem, priceMonth } from "./price";
 import { DIRECT_REASON, NO_SUPABASE_REASON, type ResolvedStack } from "./stack";
 import { type MonthUsage, workloadMonths } from "./workload";
 
@@ -119,4 +119,110 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
   const verdicts = noCache.map((_, i) => at(i));
   const paysOff = verdicts.findIndex((v) => v.kind === "add_cache" || (v.kind === "no_tier_fits" && v.cacheFixesIt === true));
   return { ...verdicts[0], paysOffMonth: paysOff === -1 ? null : paysOff + 1 };
+}
+
+export type EventKind = "plan_limit" | "overage_start" | "compute_upgrade" | "compute_saturated" | "cache_pays_off";
+
+export interface SimEvent {
+  /** Dedupe key: each event fires once. */
+  key: string;
+  month: number;
+  kind: EventKind;
+  service: Service;
+  message: string;
+}
+
+export interface MonthResult {
+  month: number;
+  usage: MonthUsage;
+  items: LineItem[];
+  totalsByService: Partial<Record<Service, number>>;
+  total: number;
+  restricted: boolean;
+  computeSize: ComputeKey | null;
+  computeFits: boolean;
+}
+
+export interface Provenance {
+  service: Service;
+  plan: string;
+  label: string;
+  version: string;
+  verifiedAt: string;
+  sourceUrl: string;
+  stale: boolean;
+}
+
+export interface SimulationResult {
+  months: MonthResult[];
+  verdict: CacheVerdict;
+  events: SimEvent[];
+  notices: string[];
+  provenance: Provenance[];
+}
+
+export function collectEvents(months: MonthResult[], verdict: CacheVerdict, stack: ResolvedStack, inputs: SimInputs, catalog: Catalog): SimEvent[] {
+  const events: SimEvent[] = [];
+  const seen = new Set<string>();
+  const once = (e: SimEvent) => {
+    if (seen.has(e.key)) return;
+    seen.add(e.key);
+    events.push(e);
+  };
+  const planLabel = new Map(enabledPlans(stack).map((p) => [p.service, sheetFor(catalog, p.service, p.plan)?.label ?? p.plan]));
+  const sizeIndex = (key: ComputeKey | null) => catalog.compute.findIndex((c) => c.key === key);
+  const sizeLabel = (key: ComputeKey | null) => catalog.compute.find((c) => c.key === key)?.label ?? "";
+
+  months.forEach((m, i) => {
+    for (const item of m.items) {
+      const included = formatAmount(item.included, item.unit);
+      if (item.restricted) {
+        once({
+          key: `limit:${item.service}:${item.key}`,
+          month: m.month,
+          kind: "plan_limit",
+          service: item.service,
+          message: `${item.label} passes the ${planLabel.get(item.service)} limit (${included}). A paid plan is required.`,
+        });
+      } else if (item.included > 0 && item.billable > 0 && item.cost > 0) {
+        once({
+          key: `overage:${item.service}:${item.key}`,
+          month: m.month,
+          kind: "overage_start",
+          service: item.service,
+          message: `${item.label} goes over the included ${included}. Overage charges start.`,
+        });
+      }
+    }
+    if (!m.computeFits) {
+      once({
+        key: "compute_saturated",
+        month: m.month,
+        kind: "compute_saturated",
+        service: "supabase",
+        message: `${sizeLabel(m.computeSize)} compute can't keep up with ${formatQps(m.usage.peakDbQps)} queries/sec at ${inputs.headroomPct}% headroom.`,
+      });
+    }
+    const prev = months[i - 1];
+    if (prev && stack.compute === "auto" && m.computeFits && sizeIndex(m.computeSize) > sizeIndex(prev.computeSize)) {
+      events.push({
+        key: `compute_upgrade:${m.month}`,
+        month: m.month,
+        kind: "compute_upgrade",
+        service: "supabase",
+        message: `Database load needs ${sizeLabel(m.computeSize)} compute (peak ${formatQps(m.usage.peakDbQps)} queries/sec).`,
+      });
+    }
+  });
+
+  if (verdict.paysOffMonth !== null) {
+    events.push({
+      key: "cache_pays_off",
+      month: verdict.paysOffMonth,
+      kind: "cache_pays_off",
+      service: "upstash",
+      message: "From this month a cache is the better option: it costs less than it saves, or it's needed to keep up with load.",
+    });
+  }
+  return events.sort((a, b) => a.month - b.month);
 }
