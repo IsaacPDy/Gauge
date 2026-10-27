@@ -1,6 +1,6 @@
 import { formatMoney } from "../../units";
 import { round2 } from "../cost";
-import type { Catalog, ComputeKey, ComputeSize } from "./catalog";
+import { type Catalog, type ComputeKey, type ComputeSize, computeSize } from "./catalog";
 import { formatQps } from "./format";
 import type { SimInputs } from "./inputs";
 import { type LineItem, priceMonth } from "./price";
@@ -17,7 +17,7 @@ export interface CacheVerdict {
   tierWithoutCache: ComputeKey | null;
   tierWithCache: ComputeKey | null;
   cacheFixesIt: boolean | null;
-  /** First month (1-based) in which a cache is the cheaper option, if any. */
+  /** First month (1-based) in which a cache is the better option: cheaper, or needed to keep up with load. */
   paysOffMonth: number | null;
 }
 
@@ -51,6 +51,10 @@ function dbSideCost(items: LineItem[]): number {
   return round2(items.filter((i) => i.service === "supabase" || i.service === "upstash").reduce((s, i) => s + i.cost, 0));
 }
 
+function egressCost(items: LineItem[]): number {
+  return items.filter((i) => i.service === "supabase" && i.key === "egress_gb").reduce((s, i) => s + i.cost, 0);
+}
+
 const usd = (n: number) => formatMoney(n, "USD");
 
 type MonthVerdict = Omit<CacheVerdict, "paysOffMonth">;
@@ -64,46 +68,55 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
 
   const sizes = sizesFor(stack, catalog);
   const largest = sizes[sizes.length - 1];
-  const label = (s: ComputeSize | null) => s?.label ?? "none";
   const noCache = workloadMonths(inputs, stack, false, months);
   const withCache = workloadMonths(inputs, stack, true, months);
 
   const at = (i: number): MonthVerdict => {
     const tierNo = smallestFit(sizes, noCache[i], inputs);
     const tierWith = smallestFit(sizes, withCache[i], inputs);
-    const costNo = dbSideCost(priceMonth(noCache[i], { ...stack, cache: false }, (tierNo ?? largest).key, catalog));
-    const costWith = dbSideCost(priceMonth(withCache[i], { ...stack, cache: true }, (tierWith ?? largest).key, catalog));
+    const itemsNo = priceMonth(noCache[i], { ...stack, cache: false }, (tierNo ?? largest).key, catalog);
+    const itemsWith = priceMonth(withCache[i], { ...stack, cache: true }, (tierWith ?? largest).key, catalog);
+    const costNo = dbSideCost(itemsNo);
+    const costWith = dbSideCost(itemsWith);
+    const hit = inputs.hitPct;
+    const hr = inputs.headroomPct;
     const qps = formatQps(noCache[i].peakDbQps);
     const base = { tierWithoutCache: tierNo?.key ?? null, tierWithCache: tierWith?.key ?? null, monthlySaving: null, cacheFixesIt: null };
 
     if (tierNo === null) {
-      const plan = stack.supabase === "free" ? "Free plan " : "";
-      const fix = tierWith
-        ? ` With a cache, ${tierWith.label} compute is enough.`
-        : ` A cache at a ${inputs.hitPct}% hit rate doesn't fix this either.`;
-      return {
-        ...base,
-        kind: "no_tier_fits",
-        cacheFixesIt: tierWith !== null,
-        message: `No ${plan}compute size handles ${qps} queries/sec at ${inputs.headroomPct}% headroom.${fix}`,
-      };
+      const problem =
+        stack.supabase === "free"
+          ? `The Free plan's ${sizes[0].label} compute can't handle ${qps} queries/sec at ${hr}% headroom.`
+          : `No compute size handles ${qps} queries/sec at ${hr}% headroom.`;
+      const fix = tierWith ? ` With a cache, ${tierWith.label} compute is enough.` : ` A cache serving ${hit}% of reads doesn't fix this either.`;
+      return { ...base, kind: "no_tier_fits", cacheFixesIt: tierWith !== null, message: `${problem}${fix}` };
     }
     if (tierWith !== null && costWith < costNo) {
       const saving = round2(costNo - costWith);
-      const keep = tierWith.key !== tierNo.key ? ` and keeps you on ${tierWith.label} instead of ${tierNo.label} compute` : ", mostly in egress";
-      return { ...base, kind: "add_cache", monthlySaving: saving, message: `A cache saves about ${usd(saving)} a month${keep}.` };
+      if (tierWith.key === tierNo.key) {
+        return { ...base, kind: "add_cache", monthlySaving: saving, message: `A cache saves about ${usd(saving)} a month through lower egress, net of its own cost.` };
+      }
+      const computeSaved = computeSize(catalog, tierNo.key).monthlyPrice - computeSize(catalog, tierWith.key).monthlyPrice;
+      const egressSaved = egressCost(itemsNo) - egressCost(itemsWith);
+      const tail = egressSaved > computeSaved ? ", and lower egress accounts for most of the saving." : ".";
+      return {
+        ...base,
+        kind: "add_cache",
+        monthlySaving: saving,
+        message: `A cache saves about ${usd(saving)} a month: it keeps you on ${tierWith.label} instead of ${tierNo.label} compute${tail}`,
+      };
     }
     if (tierNo.key === sizes[0].key) {
-      return { ...base, kind: "no_cache_needed", message: `${label(tierNo)} compute handles your peak of ${qps} queries/sec, so a cache would only add cost.` };
+      return { ...base, kind: "no_cache_needed", message: `${tierNo.label} compute handles your peak of ${qps} queries/sec, so a cache would only add cost.` };
     }
-    return {
-      ...base,
-      kind: "upgrade_compute",
-      message: `You need ${label(tierNo)} compute for ${qps} queries/sec. At a ${inputs.hitPct}% hit rate a cache costs more than the larger size.`,
-    };
+    const message =
+      tierWith && tierWith.key !== tierNo.key
+        ? `Without a cache you need ${tierNo.label} compute for ${qps} queries/sec. A cache serving ${hit}% of reads would let you use ${tierWith.label}, but it costs about ${usd(round2(costWith - costNo))} a month more.`
+        : `Without a cache you need ${tierNo.label} compute for ${qps} queries/sec, and a cache serving ${hit}% of reads wouldn't let you use a smaller size.`;
+    return { ...base, kind: "upgrade_compute", message };
   };
 
   const verdicts = noCache.map((_, i) => at(i));
-  const paysOff = verdicts.findIndex((v) => v.kind === "add_cache");
+  const paysOff = verdicts.findIndex((v) => v.kind === "add_cache" || (v.kind === "no_tier_fits" && v.cacheFixesIt === true));
   return { ...verdicts[0], paysOffMonth: paysOff === -1 ? null : paysOff + 1 };
 }

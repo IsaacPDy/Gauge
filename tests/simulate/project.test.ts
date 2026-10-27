@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cacheVerdict, chooseCompute } from "@/lib/engine/simulate/project";
-import { resolveStack } from "@/lib/engine/simulate/stack";
+import { DIRECT_REASON, NO_SUPABASE_REASON, resolveStack } from "@/lib/engine/simulate/stack";
 import { workloadMonths } from "@/lib/engine/simulate/workload";
 import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
 import type { SimInputs } from "@/lib/engine/simulate/inputs";
@@ -82,5 +82,38 @@ describe("cacheVerdict", () => {
   it("does not apply without a server host or without Supabase", () => {
     expect(verdict(inputsWith({ host: "direct" })).kind).toBe("not_applicable");
     expect(verdict(inputsWith({ supabase: "off" })).kind).toBe("not_applicable");
+  });
+
+  it("explains each verdict in plain words", () => {
+    expect(verdict(atQps(50)).message).toBe("Micro compute handles your peak of 50 queries/sec, so a cache would only add cost.");
+    expect(verdict(atQps(120)).message).toMatch(/^Without a cache you need Small compute for 120 queries\/sec\. A cache serving 80% of reads would let you use Micro, but it costs about \$[\d,.]+ a month more\.$/);
+    expect(verdict(atQps(120), FREE_CACHE_CATALOG).message).toBe("A cache saves about $5.00 a month: it keeps you on Micro instead of Small compute.");
+    expect(verdict(inputsWith({ responseKB: 100, fileDownloadMBPerUser: 0 }), FREE_CACHE_CATALOG).message).toBe(
+      "A cache saves about $31.50 a month through lower egress, net of its own cost.",
+    );
+    expect(verdict(atQps(500)).message).toBe("No compute size handles 500 queries/sec at 70% headroom. With a cache, Medium compute is enough.");
+  });
+
+  it("says when a cache can't rescue an overloaded database", () => {
+    const v = verdict(atQps(1_000));
+    expect(v).toMatchObject({ kind: "no_tier_fits", cacheFixesIt: false, tierWithCache: null });
+    expect(v.message).toBe("No compute size handles 1,000 queries/sec at 70% headroom. A cache serving 80% of reads doesn't fix this either.");
+  });
+
+  it("names the Free plan's single compute size", () => {
+    const v = verdict(atQps(100, { supabase: "free" }));
+    expect(v.kind).toBe("no_tier_fits");
+    expect(v.message).toBe("The Free plan's Nano compute can't handle 100 queries/sec at 70% headroom. A cache serving 80% of reads doesn't fix this either.");
+  });
+
+  it("counts a cache that keeps an overloaded database running as paying off", () => {
+    const v = verdict(atQps(250, { growthPct: 10 }));
+    expect(v.kind).toBe("upgrade_compute");
+    expect(v.paysOffMonth).toBe(3);
+  });
+
+  it("returns the shared reasons when it doesn't apply", () => {
+    expect(verdict(inputsWith({ host: "direct" })).message).toBe(DIRECT_REASON);
+    expect(verdict(inputsWith({ supabase: "off" })).message).toBe(NO_SUPABASE_REASON);
   });
 });
