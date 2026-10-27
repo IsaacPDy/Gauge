@@ -4,6 +4,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ComposedChart,
   Legend,
   Line,
@@ -13,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { formatValue, niceTicks } from "@/lib/units";
+import { formatCount, formatMoney, formatValue, niceTicks } from "@/lib/units";
 
 export interface TrendPoint {
   day: string;
@@ -180,6 +181,73 @@ export function BreakdownChart({
               radius={i === keys.length - 1 ? [4, 4, 0, 0] : 0}
               isAnimationActive={false}
             />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/** Monthly cost stacked by service. Months that go over a plan limit are hatched. */
+export function CostProjectionChart({
+  data,
+  keys,
+  labels,
+  height = 260,
+}: {
+  data: Record<string, number | string | boolean>[];
+  keys: string[];
+  labels: Record<string, string>;
+  height?: number;
+}) {
+  const money = (v: number) => formatMoney(v, "USD");
+  const series = keys.slice(0, 4);
+  return (
+    <div style={{ height }} className="w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }} barCategoryGap="20%">
+          <defs>
+            {series.map((k, i) => (
+              <pattern key={k} id={`hatch-${k}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <rect width="6" height="6" fill={SERIES_COLORS[i]} />
+                <line x1="0" y1="0" x2="0" y2="6" stroke="var(--surface)" strokeWidth="3" />
+              </pattern>
+            ))}
+          </defs>
+          <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
+          <XAxis dataKey="month" tick={axisTick} tickLine={false} axisLine={{ stroke: "var(--border)" }} />
+          <YAxis tickFormatter={(v: number) => `$${formatCount(v)}`} tick={axisTick} tickLine={false} axisLine={false} width={64} />
+          <Tooltip
+            cursor={{ fill: "var(--surface-2)" }}
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null;
+              const row = payload[0].payload as Record<string, number | string | boolean>;
+              const rows: [string, string, string?][] = series.map((k, i) => [labels[k] ?? k, money(Number(row[k] ?? 0)), SERIES_COLORS[i]]);
+              rows.push(["Total", money(series.reduce((s, k) => s + Number(row[k] ?? 0), 0))]);
+              return <TooltipBox title={row.restricted ? `${label} · over a plan limit` : String(label)} rows={rows} />;
+            }}
+          />
+          <Legend
+            iconType="square"
+            iconSize={8}
+            wrapperStyle={{ fontSize: 12, color: "var(--muted)" }}
+            formatter={(v: string) => <span style={{ color: "var(--muted)" }}>{labels[v] ?? v}</span>}
+          />
+          {series.map((k, i) => (
+            <Bar
+              key={k}
+              dataKey={k}
+              stackId="a"
+              fill={SERIES_COLORS[i]}
+              stroke="var(--surface)"
+              strokeWidth={2}
+              radius={i === series.length - 1 ? [4, 4, 0, 0] : 0}
+              isAnimationActive={false}
+            >
+              {data.map((d) => (
+                <Cell key={String(d.month)} fill={d.restricted ? `url(#hatch-${k})` : SERIES_COLORS[i]} />
+              ))}
+            </Bar>
           ))}
         </BarChart>
       </ResponsiveContainer>
