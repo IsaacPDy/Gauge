@@ -5,6 +5,7 @@ import { Notice } from "@/components/ui";
 import { simulate } from "@/lib/engine/simulate";
 import { encode, type PresetKey, presetInputs, type SimInputs } from "@/lib/engine/simulate/inputs";
 import { SimulatorForm } from "./simulator-form";
+import { SimulatorResults } from "./simulator-results";
 
 export function SimulatorView({ initialInputs, initialNotices }: { initialInputs: SimInputs; initialNotices: string[] }) {
   const [inputs, setInputs] = useState(initialInputs);
@@ -52,8 +53,7 @@ export function SimulatorView({ initialInputs, initialNotices }: { initialInputs
             </ul>
           </Notice>
         ) : null}
-        {/* Replaced by <SimulatorResults> in Task 13. */}
-        <pre className="text-xs">{JSON.stringify({ month, setMonth: typeof setMonth, total: result.months[0]?.total }, null, 2)}</pre>
+        <SimulatorResults result={result} month={month} onMonth={setMonth} />
       </div>
     </div>
   );
