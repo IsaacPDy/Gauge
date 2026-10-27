@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Bell, Boxes, Cloud, Gauge, Home, Settings, Siren } from "lucide-react";
+import { Bell, Boxes, Calculator, Cloud, Gauge, Home, Settings, Siren } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -10,6 +10,7 @@ const ITEMS = [
   { href: "/applications", label: "Applications", icon: Boxes },
   { href: "/providers", label: "Providers", icon: Cloud },
   { href: "/usage", label: "Usage", icon: Gauge },
+  { href: "/simulator", label: "Simulator", icon: Calculator },
   { href: "/alerts", label: "Alerts", icon: Siren },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
