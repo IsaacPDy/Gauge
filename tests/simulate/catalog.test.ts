@@ -26,10 +26,16 @@ describe("CATALOG", () => {
     }
   });
 
-  it("only credits items that exist on the sheet (or compute)", () => {
+  it("only credits items that exist on the sheet (or Supabase compute)", () => {
     for (const s of CATALOG.sheets) {
       const keys = new Set(s.items.map((i) => i.key));
-      for (const k of s.credit?.appliesTo ?? []) expect(k === "compute" || keys.has(k)).toBe(true);
+      for (const k of s.credit?.appliesTo ?? []) expect((k === "compute" && s.service === "supabase") || keys.has(k)).toBe(true);
+    }
+  });
+
+  it("uses each item key once per sheet", () => {
+    for (const s of CATALOG.sheets) {
+      expect(new Set(s.items.map((i) => i.key)).size).toBe(s.items.length);
     }
   });
 

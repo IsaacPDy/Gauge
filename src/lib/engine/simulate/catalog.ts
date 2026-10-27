@@ -47,6 +47,7 @@ export interface PriceSheet {
   version: string;
   verifiedAt: string; // YYYY-MM-DD
   sourceUrl: string;
+  /** Per month; per seat when `perSeat` is set. */
   baseFee: number;
   perSeat?: boolean;
   /** Monthly credit offsetting the listed items (never the base fee). */
@@ -67,11 +68,11 @@ function item(key: string, label: string, unit: string, includedQuantity: number
 }
 
 const VERSION = "2026-10";
-// Set each of these to the day its values were checked against the source (Task 3).
-const SUPABASE_VERIFIED = "2026-10-27";
-const UPSTASH_VERIFIED = "2026-10-27";
-const VERCEL_VERIFIED = "2026-10-27";
-const CLOUDFLARE_VERIFIED = "2026-10-27";
+// Day each service's values were last checked against its source. "2000-01-01" means not yet checked, which the UI shows as possibly outdated.
+const SUPABASE_VERIFIED = "2000-01-01";
+const UPSTASH_VERIFIED = "2000-01-01";
+const VERCEL_VERIFIED = "2000-01-01";
+const CLOUDFLARE_VERIFIED = "2000-01-01";
 
 const SUPABASE_PAID_ITEMS: PriceItem[] = [
   item("mau", "Monthly active users", "users", 100_000, 0.00325),
