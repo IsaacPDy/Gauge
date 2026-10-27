@@ -39,8 +39,10 @@ export function simulate(inputs: SimInputs, opts: { catalog?: Catalog; now?: Dat
   const provenance = enabledPlans(stack).flatMap(({ service, plan }) => {
     const sheet = sheetFor(catalog, service, plan);
     if (!sheet) return [];
-    const ageDays = (now.getTime() - Date.parse(`${sheet.verifiedAt}T00:00:00Z`)) / DAY_MS;
-    return [{ service, plan, label: sheet.label, version: sheet.version, verifiedAt: sheet.verifiedAt, sourceUrl: sheet.sourceUrl, stale: ageDays > STALE_AFTER_DAYS }];
+    // Whole UTC days; a malformed date gives NaN, which counts as stale.
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const ageDays = Math.floor((today - Date.parse(`${sheet.verifiedAt}T00:00:00Z`)) / DAY_MS);
+    return [{ service, plan, label: sheet.label, version: sheet.version, verifiedAt: sheet.verifiedAt, sourceUrl: sheet.sourceUrl, stale: !(ageDays <= STALE_AFTER_DAYS) }];
   });
 
   return { months, verdict, events: collectEvents(months, verdict, stack, inputs, catalog), notices, provenance };

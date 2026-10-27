@@ -121,10 +121,10 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
   return { ...verdicts[0], paysOffMonth: paysOff === -1 ? null : paysOff + 1 };
 }
 
-export type EventKind = "plan_limit" | "overage_start" | "compute_upgrade" | "compute_saturated" | "cache_pays_off";
+export type EventKind = "plan_limit" | "overage_start" | "credit_used_up" | "compute_upgrade" | "compute_saturated" | "cache_pays_off";
 
 export interface SimEvent {
-  /** Dedupe key: each event fires once. */
+  /** Dedupe key. Most events fire once; compute upgrades can fire in several months. */
   key: string;
   month: number;
   kind: EventKind;
@@ -169,9 +169,18 @@ export function collectEvents(months: MonthResult[], verdict: CacheVerdict, stac
     seen.add(e.key);
     events.push(e);
   };
-  const planLabel = new Map(enabledPlans(stack).map((p) => [p.service, sheetFor(catalog, p.service, p.plan)?.label ?? p.plan]));
   const sizeIndex = (key: ComputeKey | null) => catalog.compute.findIndex((c) => c.key === key);
-  const sizeLabel = (key: ComputeKey | null) => catalog.compute.find((c) => c.key === key)?.label ?? "";
+  const sizeOf = (key: ComputeKey | null) => catalog.compute.find((c) => c.key === key);
+  const sizeLabel = (key: ComputeKey | null) => sizeOf(key)?.label ?? "";
+
+  // Items a plan's usage credit offsets: their overages surface as one "credit used up" event per service.
+  const credits = enabledPlans(stack).flatMap(({ service, plan }) => {
+    const credit = sheetFor(catalog, service, plan)?.credit;
+    if (!credit) return [];
+    const keys = new Set(credit.appliesTo.filter((k) => k !== "compute"));
+    return keys.size === 0 ? [] : [{ service, amount: credit.amount, keys }];
+  });
+  const creditCovers = (service: Service, key: string) => credits.some((c) => c.service === service && c.keys.has(key));
 
   months.forEach((m, i) => {
     for (const item of m.items) {
@@ -182,15 +191,21 @@ export function collectEvents(months: MonthResult[], verdict: CacheVerdict, stac
           month: m.month,
           kind: "plan_limit",
           service: item.service,
-          message: `${item.label} passes the ${planLabel.get(item.service)} limit (${included}). A paid plan is required.`,
+          message: `Over the plan limit for ${item.label} (${included} included). A paid plan is required.`,
         });
-      } else if (item.included > 0 && item.billable > 0 && item.cost > 0) {
+      } else if (item.included > 0 && item.billable > 0 && item.cost > 0 && !creditCovers(item.service, item.key)) {
+        const key = `overage:${item.service}:${item.key}`;
+        // Month 1 is the starting state: its overages already show in the line items, so they never become events.
+        if (m.month === 1) {
+          seen.add(key);
+          continue;
+        }
         once({
-          key: `overage:${item.service}:${item.key}`,
+          key,
           month: m.month,
           kind: "overage_start",
           service: item.service,
-          message: `${item.label} goes over the included ${included}. Overage charges start.`,
+          message: `Overage charges start for ${item.label} above the included ${included}.`,
         });
       }
     }
@@ -205,22 +220,40 @@ export function collectEvents(months: MonthResult[], verdict: CacheVerdict, stac
     }
     const prev = months[i - 1];
     if (prev && stack.compute === "auto" && m.computeFits && sizeIndex(m.computeSize) > sizeIndex(prev.computeSize)) {
+      const delta = (sizeOf(m.computeSize)?.monthlyPrice ?? 0) - (sizeOf(prev.computeSize)?.monthlyPrice ?? 0);
       events.push({
         key: `compute_upgrade:${m.month}`,
         month: m.month,
         kind: "compute_upgrade",
         service: "supabase",
-        message: `Database load needs ${sizeLabel(m.computeSize)} compute (peak ${formatQps(m.usage.peakDbQps)} queries/sec).`,
+        message: `Database load needs ${sizeLabel(m.computeSize)} compute (peak ${formatQps(m.usage.peakDbQps)} queries/sec), ${usd(delta)} a month more than ${sizeLabel(prev.computeSize)}.`,
       });
     }
   });
 
-  if (verdict.paysOffMonth !== null) {
+  for (const c of credits) {
+    const eligible = (m: MonthResult) => m.items.filter((it) => it.service === c.service && c.keys.has(it.key)).reduce((s, it) => s + it.cost, 0);
+    // Already above the credit in month 1: that is the starting state, not an event.
+    if (months.length === 0 || eligible(months[0]) > c.amount) continue;
+    const m = months.find((x) => x.month > 1 && eligible(x) > c.amount);
+    if (m) {
+      once({
+        key: `credit:${c.service}`,
+        month: m.month,
+        kind: "credit_used_up",
+        service: c.service,
+        message: `Usage now exceeds the ${usd(c.amount)} monthly credit, so the bill rises above the plan fee.`,
+      });
+    }
+  }
+
+  // A month-1 payoff is the verdict card's headline already. Attributed to Supabase: Upstash may not be enabled.
+  if (verdict.paysOffMonth !== null && verdict.paysOffMonth !== 1) {
     events.push({
       key: "cache_pays_off",
       month: verdict.paysOffMonth,
       kind: "cache_pays_off",
-      service: "upstash",
+      service: "supabase",
       message: "From this month a cache is the better option: it costs less than it saves, or it's needed to keep up with load.",
     });
   }
