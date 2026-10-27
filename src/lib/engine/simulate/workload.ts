@@ -43,6 +43,7 @@ export interface MonthUsage {
 export function workloadMonths(inputs: SimInputs, stack: ResolvedStack, cacheOn: boolean, months = 12): MonthUsage[] {
   const growth = 1 + inputs.growthPct / 100;
   const server = stack.host !== "direct";
+  const cache = cacheOn && server;
   const out: MonthUsage[] = [];
   let usersSoFar = 0;
   let prevMau = 0;
@@ -60,7 +61,7 @@ export function workloadMonths(inputs: SimInputs, stack: ResolvedStack, cacheOn:
     const dbQueries = inputs.dbQueriesOverride !== null ? inputs.dbQueriesOverride * factor : requests * inputs.queriesPerRequest;
     const reads = dbQueries * (inputs.readPct / 100);
     const writes = dbQueries - reads;
-    const cacheHits = cacheOn ? reads * (inputs.hitPct / 100) : 0;
+    const cacheHits = cache ? reads * (inputs.hitPct / 100) : 0;
     const dbHits = dbQueries - cacheHits;
     const avgDbQps = dbHits / SECONDS_PER_MONTH;
     const peakDbQps = avgDbQps * inputs.peakToAvg;
@@ -72,7 +73,7 @@ export function workloadMonths(inputs: SimInputs, stack: ResolvedStack, cacheOn:
     const fileEgressGB = (mau * inputs.fileDownloadMBPerUser) / 1e3;
     const realtimeUsers = dau * (inputs.realtimePct / 100);
     const serverRequests = server ? requests : 0;
-    const cacheStorageGB = cacheOn ? dbSizeGB * (inputs.cachedKeysPct / 100) : 0;
+    const cacheStorageGB = cache ? dbSizeGB * (inputs.cachedKeysPct / 100) : 0;
 
     out.push({
       month,
@@ -95,13 +96,14 @@ export function workloadMonths(inputs: SimInputs, stack: ResolvedStack, cacheOn:
       storageGB,
       storageAddedGB,
       fnInvocations: requests * (inputs.functionPct / 100),
+      // Assumes each Realtime user stays connected about an hour a day, scaled by the peak factor.
       rtPeakConnections: (realtimeUsers * inputs.peakToAvg) / 24,
       rtMessages: realtimeUsers * inputs.realtimeMsgsPerUserDay * DAYS_PER_MONTH,
       serverRequests,
       cpuMs: serverRequests * inputs.cpuMs,
-      cacheCommands: cacheOn ? reads + (reads - cacheHits) + writes : 0,
+      cacheCommands: cache ? reads + (reads - cacheHits) + writes : 0,
       cacheStorageGB,
-      cacheKeys: cacheOn ? (cacheStorageGB * 1e6) / inputs.cacheValueKB : 0,
+      cacheKeys: cache ? (cacheStorageGB * 1e6) / inputs.cacheValueKB : 0,
       fileWrites: (storageAddedGB * 1e3) / inputs.avgFileMB,
       fileReads: (fileEgressGB * 1e3) / inputs.avgFileMB,
     });
