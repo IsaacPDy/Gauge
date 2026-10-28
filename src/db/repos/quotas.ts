@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "../client";
 import type { Json } from "../json";
+import { pick } from "../pick";
 import { quota_evaluations, quota_rules } from "../schema";
 import type { WorkspaceScope } from "../scope";
 
@@ -9,11 +10,21 @@ export async function listQuotasWithEvaluations(s: WorkspaceScope) {
   const rows = await db
     .select({ quota: quota_rules, evaluation: quota_evaluations })
     .from(quota_rules)
-    .leftJoin(quota_evaluations, eq(quota_evaluations.quota_rule_id, quota_rules.id))
+    .leftJoin(quota_evaluations, and(eq(quota_evaluations.quota_rule_id, quota_rules.id), eq(quota_evaluations.workspace_id, quota_rules.workspace_id)))
     .where(eq(quota_rules.workspace_id, s.workspaceId))
     .orderBy(asc(quota_rules.created_at));
   return rows.map((r) => ({ ...r.quota, quota_evaluations: r.evaluation }));
 }
+
+const USER_QUOTA_KEYS = [
+  "limit_value",
+  "overage_effect",
+  "pricing_rule_id",
+  "thresholds",
+  "notes",
+  "plan_hint",
+  "verified_at",
+] as const;
 
 export interface UserQuotaValues {
   limit_value: number;
@@ -35,6 +46,7 @@ export async function saveUserQuota(
   key: { metric_key: string; scope_type: "account" | "resource"; scopeId: string; unit: string },
   values: UserQuotaValues,
 ): Promise<void> {
+  const picked = pick(values, USER_QUOTA_KEYS);
   const scopeColumn = key.scope_type === "account" ? quota_rules.account_id : quota_rules.resource_id;
   const [existing] = await db
     .select({ id: quota_rules.id })
@@ -51,12 +63,12 @@ export async function saveUserQuota(
   if (existing) {
     await db
       .update(quota_rules)
-      .set(values)
+      .set(picked)
       .where(and(eq(quota_rules.id, existing.id), eq(quota_rules.workspace_id, s.workspaceId), eq(quota_rules.source, "user")));
     return;
   }
   await db.insert(quota_rules).values({
-    ...values,
+    ...picked,
     workspace_id: s.workspaceId,
     metric_key: key.metric_key,
     scope_type: key.scope_type,

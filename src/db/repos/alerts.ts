@@ -3,6 +3,7 @@ import { selectAlertWithRelations } from "../alert-relations";
 import { db } from "../client";
 import { alert_rules, alerts, cost_records, notification_deliveries } from "../schema";
 import type { WorkspaceScope } from "../scope";
+import { pick } from "../pick";
 import type { Row } from "../types";
 
 export const listAlerts = (s: WorkspaceScope, opts: { statuses?: string[]; limit: number }) =>
@@ -38,7 +39,7 @@ export async function listInbox(s: WorkspaceScope, limit: number) {
       alert: { id: alerts.id, title: alerts.title, severity: alerts.severity, category: alerts.category, status: alerts.status },
     })
     .from(notification_deliveries)
-    .leftJoin(alerts, eq(notification_deliveries.alert_id, alerts.id))
+    .leftJoin(alerts, and(eq(notification_deliveries.alert_id, alerts.id), eq(alerts.workspace_id, notification_deliveries.workspace_id)))
     .where(
       and(
         eq(notification_deliveries.workspace_id, s.workspaceId),
@@ -57,15 +58,21 @@ export async function acknowledgeAlert(s: WorkspaceScope, id: string): Promise<v
   await db
     .update(alerts)
     .set({ status: "acknowledged", acknowledged_at: new Date().toISOString(), acknowledged_by: s.userId })
-    .where(mine(s, id));
+    .where(and(mine(s, id), inArray(alerts.status, ["open", "acknowledged"])));
 }
 
 export async function muteAlert(s: WorkspaceScope, id: string, untilIso: string): Promise<void> {
-  await db.update(alerts).set({ status: "muted", muted_until: untilIso }).where(mine(s, id));
+  await db
+    .update(alerts)
+    .set({ status: "muted", muted_until: untilIso })
+    .where(and(mine(s, id), inArray(alerts.status, ["open", "acknowledged", "muted"])));
 }
 
 export async function unmuteAlert(s: WorkspaceScope, id: string): Promise<void> {
-  await db.update(alerts).set({ status: "open", muted_until: null }).where(mine(s, id));
+  await db
+    .update(alerts)
+    .set({ status: "open", muted_until: null })
+    .where(and(mine(s, id), eq(alerts.status, "muted")));
 }
 
 /** Marks one notification read. Returns the alert it points at, or null if it is not in this workspace. */
@@ -113,10 +120,13 @@ export async function countUnreadInApp(s: WorkspaceScope): Promise<number> {
 
 export const listAlertRules = (s: WorkspaceScope) => db.select().from(alert_rules).where(eq(alert_rules.workspace_id, s.workspaceId));
 
-type AlertRulePatch = Partial<Pick<Row<"alert_rules">, "enabled" | "thresholds" | "notify_in_app" | "notify_email">>;
+const ALERT_RULE_KEYS = ["enabled", "thresholds", "notify_in_app", "notify_email"] as const;
+type AlertRulePatch = Partial<Pick<Row<"alert_rules">, (typeof ALERT_RULE_KEYS)[number]>>;
 
 export async function updateAlertRule(s: WorkspaceScope, id: string, patch: AlertRulePatch): Promise<void> {
-  await db.update(alert_rules).set(patch).where(and(eq(alert_rules.id, id), eq(alert_rules.workspace_id, s.workspaceId)));
+  const values = pick(patch, ALERT_RULE_KEYS);
+  if (!Object.keys(values).length) return;
+  await db.update(alert_rules).set(values).where(and(eq(alert_rules.id, id), eq(alert_rules.workspace_id, s.workspaceId)));
 }
 
 /** Cost records whose period has not ended yet. */

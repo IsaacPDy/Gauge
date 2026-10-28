@@ -21,7 +21,7 @@ export function loadSamples(
       opts.resourceIds.length ? inArray(usage_samples.resource_id, opts.resourceIds) : undefined,
       opts.accountIds.length ? inArray(usage_samples.account_id, opts.accountIds) : undefined,
     ].filter((c): c is SQL => c !== undefined);
-    if (either.length) where.push(or(...either));
+    where.push(either.length ? or(...either)! : sql`false`);
   } else if (opts.resourceIds) {
     where.push(opts.resourceIds.length ? inArray(usage_samples.resource_id, opts.resourceIds) : sql`false`);
   } else if (opts.accountIds) {

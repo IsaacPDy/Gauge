@@ -1,4 +1,4 @@
-import { eq, type SQL } from "drizzle-orm";
+import { and, eq, type SQL } from "drizzle-orm";
 import { db } from "./client";
 import { alerts, applications, provider_accounts, provider_connections, provider_resources } from "./schema";
 
@@ -17,10 +17,10 @@ export async function selectAlertWithRelations(where: SQL) {
       app: { id: applications.id, name: applications.name },
     })
     .from(alerts)
-    .leftJoin(provider_connections, eq(alerts.connection_id, provider_connections.id))
-    .leftJoin(provider_resources, eq(alerts.resource_id, provider_resources.id))
-    .leftJoin(provider_accounts, eq(alerts.account_id, provider_accounts.id))
-    .leftJoin(applications, eq(alerts.application_id, applications.id))
+    .leftJoin(provider_connections, and(eq(alerts.connection_id, provider_connections.id), eq(provider_connections.workspace_id, alerts.workspace_id)))
+    .leftJoin(provider_resources, and(eq(alerts.resource_id, provider_resources.id), eq(provider_resources.workspace_id, alerts.workspace_id)))
+    .leftJoin(provider_accounts, and(eq(alerts.account_id, provider_accounts.id), eq(provider_accounts.workspace_id, alerts.workspace_id)))
+    .leftJoin(applications, and(eq(alerts.application_id, applications.id), eq(applications.workspace_id, alerts.workspace_id)))
     .where(where)
     .limit(1);
   if (!r) return null;

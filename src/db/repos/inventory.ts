@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../client";
 import { application_resources, applications, provider_accounts, provider_connections, provider_resources, sync_runs } from "../schema";
+import { pick } from "../pick";
 import type { WorkspaceScope } from "../scope";
 import type { NewRow, Row } from "../types";
 
@@ -31,12 +32,27 @@ export async function getConnection(s: WorkspaceScope, id: string): Promise<Row<
   return row ?? null;
 }
 
-type ConnectionPatch = Partial<Omit<Row<"provider_connections">, "id" | "workspace_id" | "provider" | "created_at" | "created_by">>;
+const CONNECTION_PATCH_KEYS = [
+  "label",
+  "status",
+  "status_detail",
+  "status_changed_at",
+  "next_sync_at",
+  "locked_until",
+  "consecutive_failures",
+  "disconnected_at",
+  "auth_method",
+  "last_manual_sync_at",
+] as const;
+
+type ConnectionPatch = Partial<Pick<Row<"provider_connections">, (typeof CONNECTION_PATCH_KEYS)[number]>>;
 
 export async function patchConnection(s: WorkspaceScope, id: string, patch: ConnectionPatch): Promise<void> {
+  const values = pick(patch, CONNECTION_PATCH_KEYS);
+  if (!Object.keys(values).length) return;
   await db
     .update(provider_connections)
-    .set(patch)
+    .set(values)
     .where(and(eq(provider_connections.id, id), eq(provider_connections.workspace_id, s.workspaceId)));
 }
 
@@ -70,7 +86,7 @@ export async function setResourcesMonitored(
       and(
         inArray(provider_resources.id, ids),
         eq(provider_resources.workspace_id, s.workspaceId),
-        onlyConnectionId ? eq(provider_resources.connection_id, onlyConnectionId) : undefined,
+        onlyConnectionId !== undefined ? eq(provider_resources.connection_id, onlyConnectionId) : undefined,
       ),
     )
     .returning({ connection_id: provider_resources.connection_id });
@@ -112,7 +128,7 @@ export async function getScopePlan(
   const [row] = await db
     .select({ plan: provider_accounts.plan })
     .from(provider_resources)
-    .leftJoin(provider_accounts, eq(provider_resources.account_id, provider_accounts.id))
+    .leftJoin(provider_accounts, and(eq(provider_resources.account_id, provider_accounts.id), eq(provider_accounts.workspace_id, provider_resources.workspace_id)))
     .where(and(eq(provider_resources.id, scopeId), eq(provider_resources.workspace_id, s.workspaceId)))
     .limit(1);
   return row ? { plan: row.plan ?? null } : null;
