@@ -38,6 +38,22 @@ describe("dbErrorMessage", () => {
     expect(dbErrorMessage(null)).toBe("null");
   });
 
+  it("keeps a plain Error's own message even when it has a cause", () => {
+    const e = new Error("outer message", { cause: driverError() });
+    expect(dbErrorMessage(e)).toBe("outer message");
+  });
+
+  it("falls back to the cause name when its message is empty (AggregateError)", () => {
+    const e = new FakeDrizzleQueryError("Failed query: select 1\nparams: secret", { cause: new AggregateError([], "") });
+    expect(dbErrorMessage(e)).toBe("AggregateError");
+  });
+
+  it("recognises a DrizzleQueryError by name even when the message does not start with Failed query", () => {
+    const e = new FakeDrizzleQueryError("select 1 params: secret", { cause: new Error("boom") });
+    e.name = "DrizzleQueryError";
+    expect(dbErrorMessage(e)).toBe("boom");
+  });
+
   it('returns "Database error" for a failed query without a usable cause', () => {
     expect(dbErrorMessage(new FakeDrizzleQueryError("Failed query: select 1\nparams: secret"))).toBe("Database error");
     expect(dbErrorMessage(new FakeDrizzleQueryError("Failed query: select 1\nparams: secret", { cause: "text" }))).toBe("Database error");

@@ -1,4 +1,4 @@
-import { ne } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 import { claimDueConnections } from "../../db/claims";
 import { db } from "../../db/client";
 import { dbErrorMessage } from "../../db/errors";
@@ -37,9 +37,20 @@ export async function runSchedulerTick(now = new Date()): Promise<TickSummary> {
     await Promise.all(
       Array.from({ length: Math.min(3, queue.length) }, async () => {
         for (let c = queue.shift(); c; c = queue.shift()) {
-          const res = await runConnectionSync(c.id, "scheduled", { alreadyClaimed: true });
-          synced.push({ connectionId: c.id, status: res.status });
           touched.add(c.workspace_id);
+          try {
+            const res = await runConnectionSync(c.id, "scheduled", { alreadyClaimed: true });
+            synced.push({ connectionId: c.id, status: res.status });
+          } catch (e) {
+            console.error(`[scheduler] sync failed for connection ${c.id}: ${dbErrorMessage(e)}`);
+            synced.push({ connectionId: c.id, status: "failed" });
+            // Release the claim now rather than leaving the connection locked until the lock expires.
+            try {
+              await db.update(provider_connections).set({ locked_until: null }).where(eq(provider_connections.id, c.id));
+            } catch (e2) {
+              console.error(`[scheduler] could not release connection ${c.id}: ${dbErrorMessage(e2)}`);
+            }
+          }
         }
       }),
     );

@@ -1,6 +1,6 @@
 import { and, asc, eq, gte, inArray } from "drizzle-orm";
-import { db } from "../../db/client";
-import { dbErrorMessage, isUniqueViolation } from "../../db/errors";
+import { db, type Tx } from "../../db/client";
+import { dbErrorMessage } from "../../db/errors";
 import type { Json } from "../../db/json";
 import {
   alert_rules,
@@ -37,11 +37,15 @@ import {
   type Severity,
 } from "../types";
 import { formatValue } from "../units";
+import { chunk } from "./db";
 
 type QuotaRow = Row<"quota_rules">;
 type AlertRow = Row<"alerts">;
 
 const FORECAST_LOOKBACK_DAYS = 15;
+// Postgres allows 65,535 bound parameters per statement: keep bulk writes well under it.
+const ROW_CHUNK = 500;
+const ID_CHUNK = 1000;
 
 export interface QuotaComputation {
   quota: QuotaRow;
@@ -263,10 +267,10 @@ export async function recalculateWorkspace(workspaceId: string, now = new Date()
       cost: (c.cost ?? {}) as unknown as Json,
       computed_at: now.toISOString(),
     }));
-    await db
-      .insert(quota_evaluations)
-      .values(rows)
-      .onConflictDoUpdate({ target: quota_evaluations.quota_rule_id, set: excludedFrom(quota_evaluations, rows, ["quota_rule_id"]) });
+    const set = excludedFrom(quota_evaluations, rows, ["quota_rule_id"]);
+    for (const part of chunk(rows, ROW_CHUNK)) {
+      await db.insert(quota_evaluations).values(part).onConflictDoUpdate({ target: quota_evaluations.quota_rule_id, set });
+    }
   }
 
   // 2. Estimated / projected costs (always labelled as estimates)
@@ -305,13 +309,16 @@ export async function recalculateWorkspace(workspaceId: string, now = new Date()
       return rows;
     });
   if (costRows.length) {
-    await db
-      .insert(cost_records)
-      .values(costRows)
-      .onConflictDoUpdate({
-        target: [cost_records.workspace_id, cost_records.kind, cost_records.metric_key, cost_records.account_id, cost_records.resource_id, cost_records.period_start],
-        set: excludedFrom(cost_records, costRows, ["workspace_id", "kind", "metric_key", "account_id", "resource_id", "period_start"]),
-      });
+    const set = excludedFrom(cost_records, costRows, ["workspace_id", "kind", "metric_key", "account_id", "resource_id", "period_start"]);
+    for (const part of chunk(costRows, ROW_CHUNK)) {
+      await db
+        .insert(cost_records)
+        .values(part)
+        .onConflictDoUpdate({
+          target: [cost_records.workspace_id, cost_records.kind, cost_records.metric_key, cost_records.account_id, cost_records.resource_id, cost_records.period_start],
+          set,
+        });
+    }
   }
 
   // 3. Alerts
@@ -456,56 +463,61 @@ async function persistAlerts(
 
     const muted = groupAlerts.some((a) => a.muted_until && Date.parse(a.muted_until) > now.getTime());
     const rule = ruleBy.get(c.category);
-    const inserted = await db
-      .insert(alerts)
-      .values({
-        workspace_id: workspaceId,
-        rule_id: rule?.id ?? null,
-        category: c.category,
-        severity: c.severity,
-        status: muted ? "muted" : "open",
-        muted_until: muted ? (groupAlerts.find((a) => a.muted_until)?.muted_until ?? null) : null,
-        dedupe_key: c.dedupeKey,
-        group_key: c.groupKey,
-        title: c.title,
-        message: c.message,
-        recommended_action: c.recommendedAction,
-        connection_id: c.connectionId,
-        account_id: c.accountId,
-        resource_id: c.resourceId,
-        application_id: c.applicationId,
-        quota_rule_id: c.quotaRuleId,
-        metric_key: c.metricKey,
-        current_value: c.currentValue,
-        limit_value: c.limitValue,
-        unit: c.unit,
-        percent_used: c.percentUsed,
-        cycle_start: c.cycleStart,
-        cycle_reset_at: c.cycleResetAt,
-        forecast_breach_at: c.forecastBreachAt,
-        data_updated_at: c.dataUpdatedAt,
-        details: c.details as Json,
-      })
-      .returning()
-      .then(
-        (rows) => rows[0],
-        (e) => {
-          if (isUniqueViolation(e)) return null; // a concurrent run created it first
-          throw new Error(`Creating alert failed: ${dbErrorMessage(e)}`);
-        },
-      );
-    if (!inserted) continue;
-    created++;
+    // Insert, escalation and delivery queueing commit together, so a crash can never leave an alert
+    // without its deliveries, or a superseded alert without its replacement.
+    let wasCreated: boolean;
+    try {
+      wasCreated = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(alerts)
+          .values({
+                workspace_id: workspaceId,
+                rule_id: rule?.id ?? null,
+                category: c.category,
+                severity: c.severity,
+                status: muted ? "muted" : "open",
+                muted_until: muted ? (groupAlerts.find((a) => a.muted_until)?.muted_until ?? null) : null,
+                dedupe_key: c.dedupeKey,
+                group_key: c.groupKey,
+                title: c.title,
+                message: c.message,
+                recommended_action: c.recommendedAction,
+                connection_id: c.connectionId,
+                account_id: c.accountId,
+                resource_id: c.resourceId,
+                application_id: c.applicationId,
+                quota_rule_id: c.quotaRuleId,
+                metric_key: c.metricKey,
+                current_value: c.currentValue,
+                limit_value: c.limitValue,
+                unit: c.unit,
+                percent_used: c.percentUsed,
+                cycle_start: c.cycleStart,
+                cycle_reset_at: c.cycleResetAt,
+                forecast_breach_at: c.forecastBreachAt,
+                data_updated_at: c.dataUpdatedAt,
+                details: c.details as Json,
+          })
+          // A concurrent run may have created it first; a plain insert error would abort the transaction.
+          .onConflictDoNothing({ target: [alerts.workspace_id, alerts.dedupe_key] })
+          .returning();
+        if (!inserted) return false;
 
-    // Escalation: the new alert supersedes less or equally severe active alerts in its group.
-    const supersede = groupAlerts.filter(
-      (a) => ACTIVE.includes(a.status) && SEVERITY_RANK[a.severity as Severity] <= SEVERITY_RANK[c.severity],
-    );
-    if (supersede.length) {
-      await db.update(alerts).set({ status: "superseded" }).where(inArray(alerts.id, supersede.map((a) => a.id)));
+        // Escalation: the new alert supersedes less or equally severe active alerts in its group.
+        const supersede = groupAlerts.filter(
+          (a) => ACTIVE.includes(a.status) && SEVERITY_RANK[a.severity as Severity] <= SEVERITY_RANK[c.severity],
+        );
+        for (const ids of chunk(supersede.map((a) => a.id), ID_CHUNK)) {
+          await tx.update(alerts).set({ status: "superseded" }).where(inArray(alerts.id, ids));
+        }
+
+        if (!muted) await queueDeliveries(tx, data, inserted, rule);
+        return true;
+      });
+    } catch (e) {
+      throw new Error(`Creating alert failed: ${dbErrorMessage(e)}`);
     }
-
-    if (!muted) await queueDeliveries(data, inserted, rule);
+    if (wasCreated) created++;
   }
 
   // Resolution: active alerts whose condition no longer holds.
@@ -524,13 +536,13 @@ async function persistAlerts(
       !effectiveQuotaIds.has(a.quota_rule_id)
     );
   });
-  if (toResolve.length) {
-    await db.update(alerts).set({ status: "resolved", resolved_at: nowIso }).where(inArray(alerts.id, toResolve.map((a) => a.id)));
+  for (const ids of chunk(toResolve.map((a) => a.id), ID_CHUNK)) {
+    await db.update(alerts).set({ status: "resolved", resolved_at: nowIso }).where(inArray(alerts.id, ids));
   }
   return created;
 }
 
-async function queueDeliveries(data: WorkspaceData, alert: AlertRow, rule: Row<"alert_rules"> | undefined) {
+async function queueDeliveries(tx: Tx, data: WorkspaceData, alert: AlertRow, rule: Row<"alert_rules"> | undefined) {
   const ws = data.workspace;
   const inApp = ws.notify_in_app && (rule?.notify_in_app ?? true);
   const severityOk = SEVERITY_RANK[alert.severity as Severity] >= SEVERITY_RANK[ws.email_min_severity as Severity];
@@ -545,7 +557,7 @@ async function queueDeliveries(data: WorkspaceData, alert: AlertRow, rule: Row<"
         : null;
   const nowIso = new Date().toISOString();
 
-  await db
+  await tx
     .insert(notification_deliveries)
     .values([
       {

@@ -37,4 +37,9 @@ describe("excludedFrom", () => {
     const { sql: text } = new PgDialect().sqlToQuery(set.b);
     expect(text).toContain('excluded."b_col"');
   });
+
+  it("throws a clear error when there is nothing to update", () => {
+    expect(() => excludedFrom(t, [{ id: "1" }], ["id"])).toThrow("excludedFrom: nothing to update for table t");
+    expect(() => excludedFrom(t, { id: "1", unknown: 2, a: undefined }, ["id"])).toThrow(/nothing to update/);
+  });
 });

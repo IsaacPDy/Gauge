@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { dbErrorMessage } from "@/db/errors";
 import { runSchedulerTick } from "@/lib/jobs/scheduler";
 
 export const dynamic = "force-dynamic";
@@ -17,8 +18,13 @@ function authorized(req: Request) {
 /** Scheduled entry point for hosted deployments (e.g. Vercel Cron or any external scheduler). */
 export async function GET(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const summary = await runSchedulerTick();
-  return NextResponse.json(summary);
+  try {
+    const summary = await runSchedulerTick();
+    return NextResponse.json(summary);
+  } catch (e) {
+    console.error("[cron] tick failed:", dbErrorMessage(e));
+    return NextResponse.json({ error: "tick failed" }, { status: 500 });
+  }
 }
 
 export const POST = GET;
