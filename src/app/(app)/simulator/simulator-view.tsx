@@ -1,29 +1,64 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Notice } from "@/components/ui";
 import { simulate } from "@/lib/engine/simulate";
-import { encode, type PresetKey, presetInputs, type SimInputs } from "@/lib/engine/simulate/inputs";
+import { decode, encode, type PresetKey, presetInputs, type SimInputs } from "@/lib/engine/simulate/inputs";
 import { SimulatorForm } from "./simulator-form";
 import { SimulatorResults } from "./simulator-results";
 
-export function SimulatorView({ initialInputs, initialNotices }: { initialInputs: SimInputs; initialNotices: string[] }) {
-  const [inputs, setInputs] = useState(initialInputs);
+export function SimulatorView({ initialNotices, now }: { initialNotices: string[]; now: string }) {
+  const params = useSearchParams();
+  const urlQuery = params.toString();
+  // Seed from the live URL rather than server props: on Back, Next.js can restore a cached
+  // render whose props describe an older query than the one in the address bar.
+  const [inputs, setInputs] = useState(() => decode(Object.fromEntries(params)).inputs);
   const [urlNotices, setUrlNotices] = useState(initialNotices);
   const [month, setMonth] = useState(1);
-  const result = useMemo(() => simulate(inputs), [inputs]);
+  const result = useMemo(() => simulate(inputs, { now: new Date(now) }), [inputs, now]);
   const query = encode(inputs);
   const edited = query !== encode(presetInputs(inputs.preset));
+
+  // The query this component last wrote, so its own writes aren't read back as navigation.
+  const lastWritten = useRef<string | null>(null);
+  const queryRef = useRef(query);
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
+  // A write that was never read back (e.g. the page was hidden first) mustn't mask a later visit.
+  useEffect(
+    () => () => {
+      lastWritten.current = null;
+    },
+    [],
+  );
 
   // Mirror inputs into the URL so a scenario can be bookmarked or shared. The native
   // history API avoids re-running the server component on every keystroke.
   useEffect(() => {
     const id = setTimeout(() => {
-      const url = `${window.location.pathname}?${query}`;
-      if (url !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(null, "", url);
+      if (window.location.search.slice(1) === query) return;
+      lastWritten.current = query;
+      window.history.replaceState(null, "", `${window.location.pathname}?${query}`);
     }, 300);
     return () => clearTimeout(id);
   }, [query]);
+
+  // Follow URL changes this component didn't make (a nav link to /simulator, Back/Forward).
+  // Our own write is skipped once, even if the user has typed on since it was scheduled.
+  useEffect(() => {
+    if (urlQuery === lastWritten.current) {
+      lastWritten.current = null;
+      return;
+    }
+    if (urlQuery === queryRef.current) return;
+    const next = decode(Object.fromEntries(new URLSearchParams(urlQuery)));
+    if (encode(next.inputs) === queryRef.current) return;
+    setInputs(next.inputs);
+    setUrlNotices(next.notices);
+    setMonth(1);
+  }, [urlQuery]);
 
   const change = (next: SimInputs) => {
     setUrlNotices([]);

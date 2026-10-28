@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Card, CardBody, CardHeader, Input, Label, Select } from "@/components/ui";
 import { CATALOG } from "@/lib/engine/simulate/catalog";
 import {
@@ -17,6 +17,30 @@ import {
   QPS_MAX,
   type SimInputs,
 } from "@/lib/engine/simulate/inputs";
+
+/**
+ * One form field laid out on its parent's grid rows (label, control, hint), so controls in
+ * the same row line up even when a neighbour's label wraps or only one of them has a hint.
+ * The parent grid must have no row gap; the field's bottom padding spaces the rows.
+ */
+function Field({ id, label, hint, children }: { id: string; label: ReactNode; hint?: string; children: ReactNode }) {
+  return (
+    <div className="row-span-3 grid min-w-0 grid-rows-subgrid pb-3">
+      <div className="self-end">
+        <Label htmlFor={id}>{label}</Label>
+      </div>
+      {children}
+      {hint ? (
+        <p id={`${id}-hint`} className="mt-1 text-xs text-faint">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Two-column grid for `Field`s. Its reduced bottom padding offsets the last row's own. */
+const FIELD_GRID = "grid grid-cols-2 gap-x-3 pb-1";
 
 interface NumberInputProps {
   id: string;
@@ -38,14 +62,22 @@ function NumberInput({ id, label, unit, hint, step, min, max, value, placeholder
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
   const shown = focused ? text : value === null ? "" : String(value);
+  // "Monthly active users (users)" says the same thing twice.
+  const showUnit = unit && unit !== "users";
   return (
-    <div className="min-w-0">
-      <Label htmlFor={id} hint={hint}>
-        {label}
-        {unit ? <span className="font-normal text-faint"> ({unit})</span> : null}
-      </Label>
+    <Field
+      id={id}
+      hint={hint}
+      label={
+        <>
+          {label}
+          {showUnit ? <span className="font-normal text-faint"> ({unit})</span> : null}
+        </>
+      }
+    >
       <Input
         id={id}
+        aria-describedby={hint ? `${id}-hint` : undefined}
         type="number"
         inputMode="decimal"
         step={step}
@@ -69,7 +101,7 @@ function NumberInput({ id, label, unit, hint, step, min, max, value, placeholder
           if (Number.isFinite(n)) onChange(normalize(n));
         }}
       />
-    </div>
+    </Field>
   );
 }
 
@@ -91,21 +123,39 @@ function FieldInput({ field, inputs, onChange }: { field: NumberField; inputs: S
   );
 }
 
-function EnumInput({ field, inputs, onChange, disabled, hint }: { field: EnumField; inputs: SimInputs; onChange: (next: SimInputs) => void; disabled?: boolean; hint?: string }) {
+function EnumInput({
+  field,
+  inputs,
+  onChange,
+  disabled,
+  hint,
+  value,
+}: {
+  field: EnumField;
+  inputs: SimInputs;
+  onChange: (next: SimInputs) => void;
+  disabled?: boolean;
+  hint?: string;
+  /** Shown instead of the stored value, e.g. while another choice pins this one. */
+  value?: string;
+}) {
   const id = `sim-${field.url}`;
   return (
-    <div className="min-w-0">
-      <Label htmlFor={id} hint={hint}>
-        {field.label}
-      </Label>
-      <Select id={id} value={inputs[field.name]} disabled={disabled} onChange={(e) => onChange({ ...inputs, [field.name]: e.target.value } as SimInputs)}>
+    <Field id={id} label={field.label} hint={hint}>
+      <Select
+        id={id}
+        value={value ?? inputs[field.name]}
+        disabled={disabled}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        onChange={(e) => onChange({ ...inputs, [field.name]: e.target.value } as SimInputs)}
+      >
         {field.options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}
       </Select>
-    </div>
+    </Field>
   );
 }
 
@@ -150,7 +200,7 @@ export function SimulatorForm({
 
       <Card>
         <CardHeader title="Stack" description="Turn on the services you use." />
-        <CardBody className="grid grid-cols-2 gap-3">
+        <CardBody className={FIELD_GRID}>
           {ENUM_FIELDS.map((f) => (
             <EnumInput
               key={f.name}
@@ -159,6 +209,7 @@ export function SimulatorForm({
               onChange={onChange}
               disabled={f.name === "compute" && inputs.supabase === "free"}
               hint={f.name === "compute" && inputs.supabase === "free" ? "Free uses Nano" : undefined}
+              value={f.name === "compute" && inputs.supabase === "free" ? CATALOG.freeCompute : undefined}
             />
           ))}
           {inputs.vercel === "pro" ? <FieldInput field={seats} inputs={inputs} onChange={onChange} /> : null}
@@ -168,7 +219,7 @@ export function SimulatorForm({
       {FIELD_GROUPS.filter((g) => g.key !== "assumptions").map((group) => (
         <Card key={group.key}>
           <CardHeader title={group.label} />
-          <CardBody className="grid grid-cols-2 gap-3">
+          <CardBody className={FIELD_GRID}>
             {NUMBER_FIELDS.filter((f) => f.group === group.key).map((f) => (
               <FieldInput key={f.name} field={f} inputs={inputs} onChange={onChange} />
             ))}
@@ -179,11 +230,11 @@ export function SimulatorForm({
       <Card>
         <details>
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text">Assumptions</summary>
-          <div className="grid grid-cols-2 gap-3 border-t border-border p-4">
+          <div className={`${FIELD_GRID} border-t border-border p-4`}>
             {NUMBER_FIELDS.filter((f) => f.group === "assumptions").map((f) => (
               <FieldInput key={f.name} field={f} inputs={inputs} onChange={onChange} />
             ))}
-            <p className="col-span-2 mt-2 text-xs text-muted">
+            <p className="col-span-2 mt-2 mb-3 text-xs text-muted">
               Planning capacity per compute size, in queries/sec. Supabase doesn&apos;t publish these figures; they&apos;re rules of thumb you can tune to your own queries.
             </p>
             {paidSizes.map((size) => (

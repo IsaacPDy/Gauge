@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import {
   Bar,
   BarChart,
@@ -188,7 +189,10 @@ export function BreakdownChart({
   );
 }
 
-/** Monthly cost stacked by service. Months that go over a plan limit are hatched. */
+/**
+ * Monthly cost stacked by service. A service's bar is hatched in months where it goes over
+ * a plan limit (`restricted_<key>` on the row).
+ */
 export function CostProjectionChart({
   data,
   keys,
@@ -202,13 +206,15 @@ export function CostProjectionChart({
 }) {
   const money = (v: number) => formatMoney(v, "USD");
   const series = keys.slice(0, 4);
+  // Pattern ids are document-global, so scope them to this chart instance.
+  const uid = useId().replace(/:/g, "");
   return (
     <div style={{ height }} className="w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }} barCategoryGap="20%">
           <defs>
             {series.map((k, i) => (
-              <pattern key={k} id={`hatch-${k}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <pattern key={k} id={`${uid}-hatch-${k}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <rect width="6" height="6" fill={SERIES_COLORS[i]} />
                 <line x1="0" y1="0" x2="0" y2="6" stroke="var(--surface)" strokeWidth="3" />
               </pattern>
@@ -245,7 +251,7 @@ export function CostProjectionChart({
               isAnimationActive={false}
             >
               {data.map((d) => (
-                <Cell key={String(d.month)} fill={d.restricted ? `url(#hatch-${k})` : SERIES_COLORS[i]} />
+                <Cell key={String(d.month)} fill={d[`restricted_${k}`] ? `url(#${uid}-hatch-${k})` : SERIES_COLORS[i]} />
               ))}
             </Bar>
           ))}

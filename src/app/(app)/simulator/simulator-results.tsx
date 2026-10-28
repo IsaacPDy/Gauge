@@ -35,9 +35,10 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
   const selected = result.months[month - 1] ?? first;
   const labels = Object.fromEntries(services.map((s) => [s, SERVICE_LABELS[s]]));
   const chartData = result.months.map((m) => ({
-    month: `M${m.month}`,
+    month: m.restricted ? `M${m.month} ⚠` : `M${m.month}`,
     restricted: m.restricted,
     ...Object.fromEntries(services.map((s) => [s, m.totalsByService[s] ?? 0])),
+    ...Object.fromEntries(services.map((s) => [`restricted_${s}`, m.items.some((i) => i.service === s && i.restricted)])),
   }));
   const verdict = VERDICT[result.verdict.kind];
   const anyRestricted = result.months.some((m) => m.restricted);
@@ -69,7 +70,9 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
         <CardHeader title="12-month projection" description="Monthly cost by service. Growth compounds each month." />
         <CardBody>
           <CostProjectionChart data={chartData} keys={services} labels={labels} />
-          {anyRestricted ? <p className="mt-2 text-xs text-muted">Hatched months go over a free plan limit, so a paid plan would be needed.</p> : null}
+          {anyRestricted ? (
+            <p className="mt-2 text-xs text-muted">Months marked ⚠ go over a free plan limit, so a paid plan would be needed. Hatched bars show which service.</p>
+          ) : null}
         </CardBody>
       </Card>
 
@@ -101,7 +104,7 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
           title="Line items"
           description="Usage, included allowance and estimated cost per service."
           actions={
-            <Select aria-label="Month" value={month} onChange={(e) => onMonth(Number(e.target.value))} className="h-7 w-auto min-w-32 text-xs">
+            <Select aria-label="Month" value={month} onChange={(e) => onMonth(Number(e.target.value))} className="h-7 w-auto text-xs">
               {result.months.map((m) => (
                 <option key={m.month} value={m.month}>
                   Month {m.month}
@@ -110,7 +113,7 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
             </Select>
           }
         />
-        <Table>
+        <Table className="min-w-[34rem]">
           <thead>
             <tr>
               <Th>Item</Th>
@@ -133,7 +136,7 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
                   const fixed = FIXED_KEYS.has(i.key);
                   return (
                     <tr key={i.key}>
-                      <Td>
+                      <Td className="min-w-44">
                         {i.label}
                         {i.restricted ? (
                           <Badge tone="crit" className="ml-2">
