@@ -3,34 +3,39 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { deleteUserData } from "@/db/bootstrap";
+import { dbErrorMessage } from "@/db/errors";
+import * as account from "@/db/repos/account";
+import { listConnections } from "@/db/repos/inventory";
 import { audit } from "@/lib/audit";
+import { auth } from "@/lib/auth/server";
+import { clearAuthCookies } from "@/lib/auth/cookies";
 import { deleteCredentials } from "@/lib/jobs/credentials";
 import { oauthConfigured, revokeTokens } from "@/lib/providers/supabase/oauth";
 import { getSession } from "@/lib/session";
-import { adminClient } from "@/lib/supabase/admin";
 import { withParams } from "@/lib/urls";
 
 const done = (ok: string) => redirect(withParams("/settings", { ok }));
 const fail = (error: string) => redirect(withParams("/settings", { error }));
 
 export async function updateProfile(form: FormData) {
-  const { supabase, user } = await getSession();
+  const { scope } = await getSession();
   const name = z.string().trim().max(80).parse(form.get("displayName") ?? "");
-  await supabase.from("profiles").update({ display_name: name || null }).eq("id", user.id);
+  await account.setDisplayName(scope, name || null);
   done("Profile saved.");
 }
 
 export async function updateWorkspace(form: FormData) {
-  const { supabase, workspace } = await getSession();
+  const { scope } = await getSession();
   const parsed = z.string().trim().min(1).max(80).safeParse(form.get("name"));
   if (!parsed.success) fail("Workspace name must be 1–80 characters.");
-  await supabase.from("workspaces").update({ name: parsed.data! }).eq("id", workspace.id);
+  await account.updateWorkspace(scope, { name: parsed.data! });
   revalidatePath("/", "layout");
   done("Workspace renamed.");
 }
 
 export async function updateNotifications(form: FormData) {
-  const { supabase, user, workspace } = await getSession();
+  const { scope, user, workspace } = await getSession();
   const parsed = z
     .object({
       notify_in_app: z.boolean(),
@@ -47,45 +52,48 @@ export async function updateNotifications(form: FormData) {
       stale_after_hours: form.get("stale_after_hours"),
     });
   if (!parsed.success) fail("Check the notification settings: " + (parsed.error.issues[0]?.message ?? "invalid value"));
-  const { error } = await supabase
-    .from("workspaces")
-    .update({ ...parsed.data!, alert_email: parsed.data!.alert_email || null })
-    .eq("id", workspace.id);
-  if (error) fail(error.message);
+  let failure: string | null = null;
+  try {
+    await account.updateWorkspace(scope, { ...parsed.data!, alert_email: parsed.data!.alert_email || null });
+  } catch (e) {
+    failure = dbErrorMessage(e);
+  }
+  if (failure) fail(failure); // outside the try: redirect() works by throwing
   await audit({ workspaceId: workspace.id, actorId: user.id, action: "settings.notifications" });
   done("Notification preferences saved.");
 }
 
 export async function changePassword(form: FormData) {
-  const { supabase, user } = await getSession();
+  const { user } = await getSession();
   const current = String(form.get("current") ?? "");
   const next = String(form.get("password") ?? "");
   if (next.length < 8) fail("The new password must have at least 8 characters.");
   if (next !== form.get("confirm")) fail("The new passwords do not match.");
-  // Re-authenticate before changing a credential.
-  const { error: authError } = await supabase.auth.signInWithPassword({ email: user.email!, password: current });
-  if (authError) fail("Your current password is incorrect.");
-  const { error } = await supabase.auth.updateUser({ password: next });
-  if (error) fail(error.message);
+  // Neon Auth checks the current password itself before changing a credential.
+  const { error } = await auth.changePassword({ currentPassword: current, newPassword: next, revokeOtherSessions: true });
+  if (error) fail(error.status === 400 ? "Your current password is incorrect." : (error.message ?? "Could not change the password."));
   await audit({ workspaceId: null, actorId: user.id, action: "auth.password_changed" });
   done("Password changed.");
 }
 
 /** Deletes the account, its workspace and all monitoring data, after revoking provider access. */
 export async function deleteAccount(form: FormData) {
-  const { supabase, user, workspace } = await getSession();
+  const { user, scope } = await getSession();
   if (String(form.get("confirm") ?? "").trim().toLowerCase() !== (user.email ?? "").toLowerCase()) {
     fail("Type your email address exactly to confirm deletion.");
   }
-  const admin = adminClient();
-  const { data: connections } = await admin.from("provider_connections").select("id").eq("workspace_id", workspace.id);
-  for (const c of connections ?? []) {
-    const creds = await deleteCredentials(admin, c.id);
+  const connections = await listConnections(scope);
+  for (const c of connections) {
+    const creds = await deleteCredentials(c.id);
     if (creds?.kind === "oauth" && oauthConfigured()) await revokeTokens(creds.refreshToken).catch(() => undefined);
   }
-  await audit({ workspaceId: null, actorId: null, action: "account.deleted", details: { connectionsRevoked: connections?.length ?? 0 } });
-  await supabase.auth.signOut();
-  const { error } = await admin.auth.admin.deleteUser(user.id);
-  if (error) fail(`Could not delete the account: ${error.message}`);
+  await audit({ workspaceId: null, actorId: null, action: "account.deleted", details: { connectionsRevoked: connections.length } });
+  // Delete the login first: if Neon refuses, nothing of the user's data has been removed yet.
+  const { error } = await auth.deleteUser();
+  if (error) fail(`Could not delete the account: ${error.message ?? "unknown error"}`);
+  // The SDK trusts its cached session cookie for up to 5 minutes; drop it so the deleted account
+  // cannot be "resurrected" by ensureUserWorkspace() on the next request.
+  await clearAuthCookies();
+  await deleteUserData(user.id);
   redirect("/login?deleted=1");
 }

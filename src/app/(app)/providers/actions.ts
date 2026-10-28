@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { z } from "zod";
-import { audit } from "@/lib/audit";
+import { dbErrorMessage } from "@/db/errors";
+import type { Json } from "@/db/json";
+import * as applicationsRepo from "@/db/repos/applications";
+import * as inventory from "@/db/repos/inventory";
+import type { WorkspaceScope } from "@/db/scope";
+import { audit, countRecentAudits } from "@/lib/audit";
 import { deleteCredentials, saveCredentials } from "@/lib/jobs/credentials";
 import { recalculateWorkspace } from "@/lib/jobs/recalc";
 import { runConnectionSync } from "@/lib/jobs/sync";
@@ -12,21 +17,19 @@ import { demoEnabled, getAdapter } from "@/lib/providers/registry";
 import { oauthConfigured, revokeTokens } from "@/lib/providers/supabase/oauth";
 import { type Credentials, type DemoSimulation, ProviderError } from "@/lib/providers/types";
 import { getSession } from "@/lib/session";
-import { adminClient } from "@/lib/supabase/admin";
-import type { Json } from "@/lib/supabase/database.types";
 import { safeNext, withParams } from "@/lib/urls";
 
 export type FormState = { error?: string } | undefined;
 
 const uuid = z.uuid();
 
-/** Confirms through RLS that the signed-in user can see this connection. */
+/** Confirms the signed-in user's workspace owns this connection. */
 async function ownedConnection(connectionId: unknown) {
   const id = uuid.parse(connectionId);
   const session = await getSession();
-  const { data } = await session.supabase.from("provider_connections").select("*").eq("id", id).maybeSingle();
-  if (!data) throw new Error("Connection not found");
-  return { ...session, connection: data };
+  const connection = await inventory.getConnection(session.scope, id);
+  if (!connection) throw new Error("Connection not found");
+  return { ...session, connection };
 }
 
 function syncInBackground(connectionId: string, workspaceId: string, trigger: "manual" | "connect") {
@@ -60,45 +63,30 @@ function describeProviderError(e: unknown): string {
 
 async function tooManyConnectionAttempts(workspaceId: string) {
   const since = new Date(Date.now() - 3_600_000).toISOString();
-  const { count } = await adminClient()
-    .from("audit_logs")
-    .select("id", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .in("action", ["connection.create", "connection.create_failed"])
-    .gte("created_at", since);
-  return (count ?? 0) >= 20;
+  return (await countRecentAudits(workspaceId, ["connection.create", "connection.create_failed"], since)) >= 20;
 }
 
 async function createConnection(opts: {
-  workspaceId: string;
-  userId: string;
+  scope: WorkspaceScope;
   provider: "supabase" | "demo";
   label: string;
   authMethod: "token" | "demo" | "oauth";
   credentials: Credentials;
   grantedScopes: string[];
 }) {
-  const admin = adminClient();
   const adapter = getAdapter(opts.provider)!;
-  const { data: conn, error } = await admin
-    .from("provider_connections")
-    .insert({
-      workspace_id: opts.workspaceId,
-      provider: opts.provider,
-      label: opts.label,
-      auth_method: opts.authMethod,
-      status: "syncing",
-      granted_scopes: opts.grantedScopes,
-      capabilities: { declared: adapter.capabilities } as unknown as Json,
-      created_by: opts.userId,
-    })
-    .select("id, workspace_id")
-    .single();
-  if (error || !conn) throw new Error(`Could not save the connection: ${error?.message}`);
-  await saveCredentials(admin, conn, opts.credentials);
+  const conn = await inventory.insertConnection(opts.scope, {
+    provider: opts.provider,
+    label: opts.label,
+    auth_method: opts.authMethod,
+    status: "syncing",
+    granted_scopes: opts.grantedScopes,
+    capabilities: { declared: adapter.capabilities } as unknown as Json,
+  });
+  await saveCredentials(conn, opts.credentials);
   await audit({
-    workspaceId: opts.workspaceId,
-    actorId: opts.userId,
+    workspaceId: opts.scope.workspaceId,
+    actorId: opts.scope.userId,
     action: "connection.create",
     targetType: "provider_connection",
     targetId: conn.id,
@@ -106,7 +94,7 @@ async function createConnection(opts: {
   });
   // Discovery runs right away so the user can pick resources to monitor.
   await runConnectionSync(conn.id, "connect");
-  await recalculateWorkspace(opts.workspaceId);
+  await recalculateWorkspace(opts.scope.workspaceId);
   return conn.id;
 }
 
@@ -116,7 +104,7 @@ const tokenForm = z.object({
 });
 
 export async function connectSupabaseToken(_: FormState, form: FormData): Promise<FormState> {
-  const { user, workspace } = await getSession();
+  const { user, workspace, scope } = await getSession();
   const parsed = tokenForm.safeParse({ label: form.get("label"), token: form.get("token") });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   if (await tooManyConnectionAttempts(workspace.id)) return { error: "Too many connection attempts. Try again in an hour." };
@@ -130,8 +118,7 @@ export async function connectSupabaseToken(_: FormState, form: FormData): Promis
     return { error: describeProviderError(e) };
   }
   const id = await createConnection({
-    workspaceId: workspace.id,
-    userId: user.id,
+    scope,
     provider: "supabase",
     label: parsed.data.label,
     authMethod: "token",
@@ -142,11 +129,10 @@ export async function connectSupabaseToken(_: FormState, form: FormData): Promis
 }
 
 export async function connectDemo() {
-  const { user, workspace } = await getSession();
+  const { scope } = await getSession();
   if (!demoEnabled()) redirect(withParams("/providers", { error: "The Demo provider is disabled." }));
   const id = await createConnection({
-    workspaceId: workspace.id,
-    userId: user.id,
+    scope,
     provider: "demo",
     label: "Demo Cloud",
     authMethod: "demo",
@@ -157,7 +143,7 @@ export async function connectDemo() {
 }
 
 export async function replaceToken(_: FormState, form: FormData): Promise<FormState> {
-  const { user, workspace, connection } = await ownedConnection(form.get("connectionId"));
+  const { user, workspace, scope, connection } = await ownedConnection(form.get("connectionId"));
   const token = z.string().trim().min(10).max(500).safeParse(form.get("token"));
   if (!token.success) return { error: "Paste a valid access token." };
   const credentials: Credentials = { kind: "token", token: token.data };
@@ -166,38 +152,42 @@ export async function replaceToken(_: FormState, form: FormData): Promise<FormSt
   } catch (e) {
     return { error: describeProviderError(e) };
   }
-  const admin = adminClient();
-  await saveCredentials(admin, connection, credentials);
-  await admin
-    .from("provider_connections")
-    .update({ auth_method: "token", status: "syncing", status_detail: null, status_changed_at: new Date().toISOString(), next_sync_at: new Date().toISOString(), consecutive_failures: 0, disconnected_at: null })
-    .eq("id", connection.id);
+  await saveCredentials(connection, credentials);
+  await inventory.patchConnection(scope, connection.id, {
+    auth_method: "token",
+    status: "syncing",
+    status_detail: null,
+    status_changed_at: new Date().toISOString(),
+    next_sync_at: new Date().toISOString(),
+    consecutive_failures: 0,
+    disconnected_at: null,
+  });
   await audit({ workspaceId: workspace.id, actorId: user.id, action: "connection.credentials_rotated", targetType: "provider_connection", targetId: connection.id });
   syncInBackground(connection.id, workspace.id, "manual");
   redirect(withParams(`/providers/${connection.id}`, { ok: "Credentials replaced. Syncing now." }));
 }
 
 export async function syncNow(form: FormData) {
-  const { workspace, connection } = await ownedConnection(form.get("connectionId"));
+  const { scope, workspace, connection } = await ownedConnection(form.get("connectionId"));
   const back = `/providers/${connection.id}`;
   if (connection.status === "disconnected") redirect(withParams(back, { error: "Reconnect this provider before syncing." }));
   if (connection.last_manual_sync_at && Date.now() - Date.parse(connection.last_manual_sync_at) < 60_000) {
     redirect(withParams(back, { error: "Please wait a minute between manual syncs." }));
   }
-  await adminClient().from("provider_connections").update({ last_manual_sync_at: new Date().toISOString() }).eq("id", connection.id);
+  await inventory.patchConnection(scope, connection.id, { last_manual_sync_at: new Date().toISOString() });
   syncInBackground(connection.id, workspace.id, "manual");
   redirect(withParams(back, { ok: "Sync started." }));
 }
 
 /** Save which discovered resources are monitored (bulk form on the connection page). */
 export async function saveMonitoring(form: FormData) {
-  const { supabase, workspace, connection } = await ownedConnection(form.get("connectionId"));
+  const { scope, workspace, connection } = await ownedConnection(form.get("connectionId"));
   const all = z.array(uuid).parse(form.getAll("ids"));
   const selected = new Set(z.array(uuid).parse(form.getAll("monitor")));
   const on = all.filter((id) => selected.has(id));
   const off = all.filter((id) => !selected.has(id));
-  if (on.length) await supabase.from("provider_resources").update({ is_monitored: true }).in("id", on).eq("connection_id", connection.id);
-  if (off.length) await supabase.from("provider_resources").update({ is_monitored: false }).in("id", off).eq("connection_id", connection.id);
+  if (on.length) await inventory.setResourcesMonitored(scope, on, true, connection.id);
+  if (off.length) await inventory.setResourcesMonitored(scope, off, false, connection.id);
   syncInBackground(connection.id, workspace.id, "manual");
   revalidatePath("/", "layout");
   redirect(withParams(`/providers/${connection.id}`, { ok: `Monitoring ${on.length} resource${on.length === 1 ? "" : "s"}. Collecting usage now.` }));
@@ -205,11 +195,11 @@ export async function saveMonitoring(form: FormData) {
 
 /** Toggle monitoring for resources from the all-resources list. */
 export async function setMonitored(form: FormData) {
-  const { supabase, workspace } = await getSession();
+  const { scope, workspace } = await getSession();
   const ids = z.array(uuid).min(1).parse(form.getAll("ids"));
   const monitored = form.get("monitored") === "true";
-  const { data } = await supabase.from("provider_resources").update({ is_monitored: monitored }).in("id", ids).select("connection_id");
-  for (const connectionId of new Set((data ?? []).map((r) => r.connection_id))) {
+  const connectionIds = await inventory.setResourcesMonitored(scope, ids, monitored);
+  for (const connectionId of connectionIds) {
     if (monitored) syncInBackground(connectionId, workspace.id, "manual");
   }
   if (!monitored) after(() => recalculateWorkspace(workspace.id).then(() => undefined));
@@ -218,15 +208,17 @@ export async function setMonitored(form: FormData) {
 }
 
 export async function assignResource(form: FormData) {
-  const { supabase, workspace } = await getSession();
+  const { scope, workspace } = await getSession();
   const resourceId = uuid.parse(form.get("resourceId"));
   const appId = form.get("applicationId");
-  await supabase.from("application_resources").delete().eq("resource_id", resourceId);
   if (typeof appId === "string" && appId) {
-    const { error } = await supabase
-      .from("application_resources")
-      .insert({ application_id: uuid.parse(appId), resource_id: resourceId, workspace_id: workspace.id });
-    if (error) throw new Error(`Could not assign resource: ${error.message}`);
+    try {
+      await applicationsRepo.assignResources(scope, uuid.parse(appId), [resourceId]);
+    } catch (e) {
+      throw new Error(`Could not assign resource: ${dbErrorMessage(e)}`);
+    }
+  } else {
+    await applicationsRepo.unassignResource(scope, resourceId);
   }
   after(() => recalculateWorkspace(workspace.id).then(() => undefined));
   revalidatePath("/", "layout");
@@ -234,34 +226,28 @@ export async function assignResource(form: FormData) {
 }
 
 export async function updateAccountCycle(form: FormData) {
-  const { supabase, workspace } = await getSession();
+  const { scope, workspace } = await getSession();
   const accountId = uuid.parse(form.get("accountId"));
   const day = z.coerce.number().int().min(1).max(28).parse(form.get("day"));
-  const { data } = await supabase
-    .from("provider_accounts")
-    .update({ billing_cycle_anchor_day: day })
-    .eq("id", accountId)
-    .select("connection_id")
-    .maybeSingle();
-  if (!data) throw new Error("Account not found");
+  const connectionId = await inventory.setAccountCycleDay(scope, accountId, day);
+  if (!connectionId) throw new Error("Account not found");
   await recalculateWorkspace(workspace.id);
   revalidatePath("/", "layout");
-  redirect(withParams(`/providers/${data.connection_id}`, { ok: `Billing cycle now resets on day ${day} of each month.` }));
+  redirect(withParams(`/providers/${connectionId}`, { ok: `Billing cycle now resets on day ${day} of each month.` }));
 }
 
 export async function renameConnection(form: FormData) {
-  const { supabase, connection } = await ownedConnection(form.get("connectionId"));
+  const { scope, connection } = await ownedConnection(form.get("connectionId"));
   const label = z.string().trim().min(1).max(80).parse(form.get("label"));
-  await supabase.from("provider_connections").update({ label }).eq("id", connection.id);
+  await inventory.patchConnection(scope, connection.id, { label });
   revalidatePath("/", "layout");
   redirect(withParams(`/providers/${connection.id}`, { ok: "Renamed." }));
 }
 
 /** Stops collection and revokes/deletes stored credentials. Historical data is kept. */
 export async function disconnect(form: FormData) {
-  const { user, workspace, connection } = await ownedConnection(form.get("connectionId"));
-  const admin = adminClient();
-  const creds = await deleteCredentials(admin, connection.id);
+  const { user, workspace, scope, connection } = await ownedConnection(form.get("connectionId"));
+  const creds = await deleteCredentials(connection.id);
   let revoked = false;
   if (creds?.kind === "oauth" && oauthConfigured()) {
     revoked = await revokeTokens(creds.refreshToken).then(
@@ -269,17 +255,14 @@ export async function disconnect(form: FormData) {
       () => false,
     );
   }
-  await admin
-    .from("provider_connections")
-    .update({
-      status: "disconnected",
-      status_detail: "Disconnected by user. Stored credentials were deleted.",
-      status_changed_at: new Date().toISOString(),
-      disconnected_at: new Date().toISOString(),
-      next_sync_at: null,
-      locked_until: null,
-    })
-    .eq("id", connection.id);
+  await inventory.patchConnection(scope, connection.id, {
+    status: "disconnected",
+    status_detail: "Disconnected by user. Stored credentials were deleted.",
+    status_changed_at: new Date().toISOString(),
+    disconnected_at: new Date().toISOString(),
+    next_sync_at: null,
+    locked_until: null,
+  });
   await audit({
     workspaceId: workspace.id,
     actorId: user.id,
@@ -299,11 +282,10 @@ export async function disconnect(form: FormData) {
 
 /** Deletes the connection with all discovered resources, usage history and quotas. */
 export async function removeConnection(form: FormData) {
-  const { user, workspace, connection } = await ownedConnection(form.get("connectionId"));
-  const admin = adminClient();
-  const creds = await deleteCredentials(admin, connection.id);
+  const { user, workspace, scope, connection } = await ownedConnection(form.get("connectionId"));
+  const creds = await deleteCredentials(connection.id);
   if (creds?.kind === "oauth" && oauthConfigured()) await revokeTokens(creds.refreshToken).catch(() => undefined);
-  await admin.from("provider_connections").delete().eq("id", connection.id);
+  await inventory.deleteConnection(scope, connection.id);
   await audit({
     workspaceId: workspace.id,
     actorId: user.id,
@@ -318,13 +300,12 @@ export async function removeConnection(form: FormData) {
 }
 
 export async function setDemoSimulation(form: FormData) {
-  const { workspace, connection } = await ownedConnection(form.get("connectionId"));
+  const { scope, workspace, connection } = await ownedConnection(form.get("connectionId"));
   if (connection.provider !== "demo") throw new Error("Only demo connections can simulate failures");
   const simulate = z.enum(["none", "auth_expired", "rate_limited", "outage", "permission"]).parse(form.get("simulate")) as DemoSimulation;
-  const admin = adminClient();
-  await saveCredentials(admin, connection, { kind: "demo", simulate });
+  await saveCredentials(connection, { kind: "demo", simulate });
   if (simulate === "none" && connection.status !== "connected") {
-    await admin.from("provider_connections").update({ next_sync_at: new Date().toISOString() }).eq("id", connection.id);
+    await inventory.patchConnection(scope, connection.id, { next_sync_at: new Date().toISOString() });
   }
   syncInBackground(connection.id, workspace.id, "manual");
   redirect(withParams(`/providers/${connection.id}`, { ok: simulate === "none" ? "Simulation off. Syncing." : `Simulating “${simulate}”. Syncing now.` }));

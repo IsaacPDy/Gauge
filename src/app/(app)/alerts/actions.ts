@@ -3,11 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { dbErrorMessage } from "@/db/errors";
+import type { Json } from "@/db/json";
+import * as alertsRepo from "@/db/repos/alerts";
 import { audit } from "@/lib/audit";
 import { normalizeThresholds } from "@/lib/engine/alerts";
 import { recalculateWorkspace } from "@/lib/jobs/recalc";
 import { getSession } from "@/lib/session";
-import type { Json } from "@/lib/supabase/database.types";
 import { safeNext, withParams } from "@/lib/urls";
 
 const uuid = z.uuid();
@@ -15,9 +17,9 @@ const uuid = z.uuid();
 async function loadAlert(form: FormData) {
   const session = await getSession();
   const id = uuid.parse(form.get("alertId"));
-  const { data } = await session.supabase.from("alerts").select("*").eq("id", id).maybeSingle();
-  if (!data) throw new Error("Alert not found");
-  return { ...session, alert: data };
+  const alert = await alertsRepo.getAlert(session.scope, id);
+  if (!alert) throw new Error("Alert not found");
+  return { ...session, alert };
 }
 
 function back(form: FormData, fallback: string) {
@@ -25,52 +27,44 @@ function back(form: FormData, fallback: string) {
 }
 
 export async function acknowledgeAlert(form: FormData) {
-  const { supabase, user, alert } = await loadAlert(form);
+  const { scope, alert } = await loadAlert(form);
   if (alert.status === "open") {
-    await supabase
-      .from("alerts")
-      .update({ status: "acknowledged", acknowledged_at: new Date().toISOString(), acknowledged_by: user.id })
-      .eq("id", alert.id);
+    await alertsRepo.acknowledgeAlert(scope, alert.id);
   }
   revalidatePath("/", "layout");
   redirect(withParams(back(form, "/alerts"), { ok: "Acknowledged. You will still be notified if it escalates." }));
 }
 
 export async function muteAlert(form: FormData) {
-  const { supabase, alert } = await loadAlert(form);
+  const { scope, alert } = await loadAlert(form);
   const duration = z.enum(["1d", "7d", "cycle"]).parse(form.get("duration"));
   const until =
     duration === "cycle" && alert.cycle_reset_at
       ? new Date(alert.cycle_reset_at)
       : new Date(Date.now() + (duration === "1d" ? 1 : duration === "7d" ? 7 : 30) * 86_400_000);
-  await supabase.from("alerts").update({ status: "muted", muted_until: until.toISOString() }).eq("id", alert.id);
+  await alertsRepo.muteAlert(scope, alert.id, until.toISOString());
   revalidatePath("/", "layout");
   redirect(withParams(back(form, "/alerts"), { ok: `Muted until ${until.toUTCString().slice(0, 16)}. No notifications for this condition until then.` }));
 }
 
 export async function unmuteAlert(form: FormData) {
-  const { supabase, alert } = await loadAlert(form);
-  await supabase.from("alerts").update({ status: "open", muted_until: null }).eq("id", alert.id);
+  const { scope, alert } = await loadAlert(form);
+  await alertsRepo.unmuteAlert(scope, alert.id);
   revalidatePath("/", "layout");
   redirect(withParams(back(form, "/alerts"), { ok: "Unmuted." }));
 }
 
 export async function openNotification(form: FormData) {
-  const { supabase } = await getSession();
+  const { scope } = await getSession();
   const deliveryId = uuid.parse(form.get("deliveryId"));
-  const { data } = await supabase
-    .from("notification_deliveries")
-    .update({ read_at: new Date().toISOString() })
-    .eq("id", deliveryId)
-    .select("alert_id")
-    .maybeSingle();
+  const alertId = await alertsRepo.markDeliveryRead(scope, deliveryId);
   revalidatePath("/", "layout");
-  redirect(data ? `/alerts/${data.alert_id}` : "/alerts?tab=inbox");
+  redirect(alertId ? `/alerts/${alertId}` : "/alerts?tab=inbox");
 }
 
 export async function markAllRead() {
-  const { supabase } = await getSession();
-  await supabase.from("notification_deliveries").update({ read_at: new Date().toISOString() }).eq("channel", "in_app").is("read_at", null);
+  const { scope } = await getSession();
+  await alertsRepo.markAllInAppRead(scope);
   revalidatePath("/", "layout");
   redirect(withParams("/alerts?tab=inbox", { ok: "All notifications marked as read." }));
 }
@@ -78,9 +72,10 @@ export async function markAllRead() {
 const SEVERITIES = ["info", "warning", "critical", "limit_reached"] as const;
 
 export async function saveAlertRules(form: FormData) {
-  const { supabase, user, workspace } = await getSession();
-  const { data: rules } = await supabase.from("alert_rules").select("*");
-  for (const rule of rules ?? []) {
+  const { scope, user, workspace } = await getSession();
+  const rules = await alertsRepo.listAlertRules(scope);
+  let failure: string | null = null;
+  for (const rule of rules) {
     const patch: { enabled: boolean; notify_in_app: boolean; notify_email: boolean; thresholds?: Json } = {
       enabled: form.get(`${rule.category}.enabled`) === "on",
       notify_in_app: form.get(`${rule.category}.in_app`) === "on",
@@ -96,9 +91,14 @@ export async function saveAlertRules(form: FormData) {
       if (!normalized) redirect(withParams("/alerts/rules", { error: "Add at least one threshold between 1% and 1000%." }));
       patch.thresholds = normalized as unknown as Json;
     }
-    const { error } = await supabase.from("alert_rules").update(patch).eq("id", rule.id);
-    if (error) redirect(withParams("/alerts/rules", { error: error.message }));
+    try {
+      await alertsRepo.updateAlertRule(scope, rule.id, patch);
+    } catch (e) {
+      failure = dbErrorMessage(e);
+      break;
+    }
   }
+  if (failure) redirect(withParams("/alerts/rules", { error: failure }));
   await audit({ workspaceId: workspace.id, actorId: user.id, action: "alert_rules.update" });
   await recalculateWorkspace(workspace.id);
   revalidatePath("/", "layout");
