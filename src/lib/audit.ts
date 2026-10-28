@@ -1,5 +1,6 @@
 import { and, count, eq, gte, inArray } from "drizzle-orm";
 import { db } from "../db/client";
+import { dbErrorMessage } from "../db/errors";
 import type { Json } from "../db/json";
 import { audit_logs } from "../db/schema";
 
@@ -22,7 +23,7 @@ export async function audit(entry: {
       details: (entry.details ?? {}) as Json,
     });
   } catch (e) {
-    console.error(`[audit] failed to record ${entry.action}: ${e instanceof Error ? e.message : String(e)}`);
+    console.error(`[audit] failed to record ${entry.action}: ${dbErrorMessage(e)}`);
   }
 }
 

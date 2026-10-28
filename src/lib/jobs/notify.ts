@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { selectAlertWithRelations } from "../../db/alert-relations";
 import { claimDueDeliveries } from "../../db/claims";
 import { db } from "../../db/client";
+import { dbErrorMessage } from "../../db/errors";
 import { alerts, notification_deliveries } from "../../db/schema";
 import { renderAlertEmail } from "../email/alert-email";
 import { sendEmail } from "../email/transport";
@@ -48,7 +49,7 @@ export async function deliverDueNotifications(): Promise<{ sent: number; failed:
       const giveUp = d.attempts >= MAX_ATTEMPTS;
       await update(d.id, {
         status: giveUp ? "failed" : "pending",
-        last_error: (e instanceof Error ? e.message : String(e)).slice(0, 300),
+        last_error: dbErrorMessage(e).slice(0, 300),
         next_attempt_at: new Date(Date.now() + 2 ** d.attempts * 60_000).toISOString(),
       });
       failed++;

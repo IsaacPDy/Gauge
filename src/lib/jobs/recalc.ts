@@ -1,6 +1,6 @@
 import { and, asc, eq, gte, inArray } from "drizzle-orm";
 import { db } from "../../db/client";
-import { isUniqueViolation } from "../../db/errors";
+import { dbErrorMessage, isUniqueViolation } from "../../db/errors";
 import type { Json } from "../../db/json";
 import {
   alert_rules,
@@ -266,7 +266,7 @@ export async function recalculateWorkspace(workspaceId: string, now = new Date()
     await db
       .insert(quota_evaluations)
       .values(rows)
-      .onConflictDoUpdate({ target: quota_evaluations.quota_rule_id, set: excludedFrom(quota_evaluations, rows[0], ["quota_rule_id"]) });
+      .onConflictDoUpdate({ target: quota_evaluations.quota_rule_id, set: excludedFrom(quota_evaluations, rows, ["quota_rule_id"]) });
   }
 
   // 2. Estimated / projected costs (always labelled as estimates)
@@ -310,7 +310,7 @@ export async function recalculateWorkspace(workspaceId: string, now = new Date()
       .values(costRows)
       .onConflictDoUpdate({
         target: [cost_records.workspace_id, cost_records.kind, cost_records.metric_key, cost_records.account_id, cost_records.resource_id, cost_records.period_start],
-        set: excludedFrom(cost_records, costRows[0], ["workspace_id", "kind", "metric_key", "account_id", "resource_id", "period_start"]),
+        set: excludedFrom(cost_records, costRows, ["workspace_id", "kind", "metric_key", "account_id", "resource_id", "period_start"]),
       });
   }
 
@@ -491,7 +491,7 @@ async function persistAlerts(
         (rows) => rows[0],
         (e) => {
           if (isUniqueViolation(e)) return null; // a concurrent run created it first
-          throw new Error(`Creating alert failed: ${e instanceof Error ? e.message : String(e)}`);
+          throw new Error(`Creating alert failed: ${dbErrorMessage(e)}`);
         },
       );
     if (!inserted) continue;

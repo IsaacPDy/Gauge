@@ -1,6 +1,7 @@
 import { ne } from "drizzle-orm";
 import { claimDueConnections } from "../../db/claims";
 import { db } from "../../db/client";
+import { dbErrorMessage } from "../../db/errors";
 import { provider_connections } from "../../db/schema";
 import { deliverDueNotifications } from "./notify";
 import { recalculateWorkspace } from "./recalc";
@@ -56,7 +57,7 @@ export async function runSchedulerTick(now = new Date()): Promise<TickSummary> {
       try {
         await recalculateWorkspace(ws, now);
       } catch (e) {
-        console.error(`[scheduler] recalculation failed for workspace ${ws}:`, e);
+        console.error(`[scheduler] recalculation failed for workspace ${ws}: ${dbErrorMessage(e)}`);
       }
     }
 

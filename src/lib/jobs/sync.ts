@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { claimConnection } from "../../db/claims";
 import { db } from "../../db/client";
+import { dbErrorMessage } from "../../db/errors";
 import type { Json } from "../../db/json";
 import { cost_records, provider_accounts, provider_connections, provider_resources, quota_rules, sync_runs, usage_samples } from "../../db/schema";
 import { excludedFrom } from "../../db/sql";
@@ -103,7 +104,7 @@ export async function runConnectionSync(
       .where(eq(sync_runs.id, run.id));
     return { connectionId: conn.id, workspaceId: conn.workspace_id, status };
   } catch (e) {
-    const err = e instanceof ProviderError ? e : new ProviderError("unknown", e instanceof Error ? e.message : String(e), { retryable: false });
+    const err = e instanceof ProviderError ? e : new ProviderError("unknown", dbErrorMessage(e), { retryable: false });
     const plan = failurePlan(conn, err, now);
     await updateConnection(conn, {
       status: plan.status,
@@ -204,7 +205,7 @@ async function persistDiscovery(conn: Connection, d: Discovery, now: Date) {
       .values(rows)
       .onConflictDoUpdate({
         target: [provider_accounts.connection_id, provider_accounts.external_id],
-        set: excludedFrom(provider_accounts, rows[0], ["connection_id", "external_id"]),
+        set: excludedFrom(provider_accounts, rows, ["connection_id", "external_id"]),
       });
   }
   const accounts = await db
@@ -241,7 +242,7 @@ async function persistDiscovery(conn: Connection, d: Discovery, now: Date) {
         .values(rows)
         .onConflictDoUpdate({
           target: [provider_resources.connection_id, provider_resources.resource_type, provider_resources.external_id],
-          set: excludedFrom(provider_resources, rows[0], ["connection_id", "resource_type", "external_id"]),
+          set: excludedFrom(provider_resources, rows, ["connection_id", "resource_type", "external_id"]),
         });
     }
   }
@@ -371,7 +372,7 @@ async function persistCollection(conn: Connection, result: CollectResult, target
       .values(part)
       .onConflictDoUpdate({
         target: [usage_samples.connection_id, usage_samples.metric_key, usage_samples.account_id, usage_samples.resource_id, usage_samples.bucket_start],
-        set: excludedFrom(usage_samples, part[0], sampleKey),
+        set: excludedFrom(usage_samples, part, sampleKey),
       });
   }
 
@@ -403,7 +404,7 @@ async function persistCollection(conn: Connection, result: CollectResult, target
       .values(quotas)
       .onConflictDoUpdate({
         target: [quota_rules.workspace_id, quota_rules.metric_key, quota_rules.account_id, quota_rules.resource_id, quota_rules.source],
-        set: excludedFrom(quota_rules, quotas[0], ["workspace_id", "metric_key", "account_id", "resource_id", "source"]),
+        set: excludedFrom(quota_rules, quotas, ["workspace_id", "metric_key", "account_id", "resource_id", "source"]),
       });
   }
 
@@ -433,7 +434,7 @@ async function persistCollection(conn: Connection, result: CollectResult, target
       .values(costs)
       .onConflictDoUpdate({
         target: [cost_records.workspace_id, cost_records.kind, cost_records.metric_key, cost_records.account_id, cost_records.resource_id, cost_records.period_start],
-        set: excludedFrom(cost_records, costs[0], ["workspace_id", "kind", "metric_key", "account_id", "resource_id", "period_start"]),
+        set: excludedFrom(cost_records, costs, ["workspace_id", "kind", "metric_key", "account_id", "resource_id", "period_start"]),
       });
   }
 

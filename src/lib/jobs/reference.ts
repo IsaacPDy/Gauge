@@ -29,7 +29,7 @@ export function ensureReferenceData(): Promise<void> {
       await db
         .insert(metric_definitions)
         .values(metrics)
-        .onConflictDoUpdate({ target: metric_definitions.key, set: excludedFrom(metric_definitions, metrics[0], ["key"]) });
+        .onConflictDoUpdate({ target: metric_definitions.key, set: excludedFrom(metric_definitions, metrics, ["key"]) });
     }
 
     const rules = allPricingRules().map((r) => ({
@@ -52,7 +52,7 @@ export function ensureReferenceData(): Promise<void> {
       await db
         .insert(pricing_rules)
         .values(rules)
-        .onConflictDoUpdate({ target: pricing_rules.id, set: excludedFrom(pricing_rules, rules[0], ["id"]) });
+        .onConflictDoUpdate({ target: pricing_rules.id, set: excludedFrom(pricing_rules, rules, ["id"]) });
     }
   })().catch((e) => {
     synced = null; // retry next time
