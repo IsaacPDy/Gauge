@@ -69,7 +69,7 @@ Provider APIs ──▶ Adapters (src/lib/providers) ──▶ Sync job (jobs/sy
 | Provider adapters | `src/lib/providers/` | Common interface with a declared capability model. Unsupported data is reported as `unsupported`, never invented or shown as zero. |
 | Pure engine | `src/lib/engine/` | Billing cycles, usage aggregation (gauge / cumulative / incremental), forecasting, cost estimates, alert evaluation and connection health. Deterministic and unit-tested. |
 | Jobs | `src/lib/jobs/` | Sync (discover → collect → persist), recalculation, notifications, scheduler. Connections are claimed with `FOR UPDATE SKIP LOCKED`, so workers can run in parallel. |
-| UI | `src/app/(app)/` | Home, Applications, Providers, Usage explorer, Limits & quotas, Alerts, Settings |
+| UI | `src/app/(app)/` | Home, Applications, Providers, Usage explorer, Limits & quotas, Cost simulator, Alerts, Settings |
 
 ### Key behaviours (mapped to the PRD)
 
@@ -80,6 +80,15 @@ Provider APIs ──▶ Adapters (src/lib/providers) ──▶ Sync job (jobs/sy
 - **Alerts.** Thresholds default to 50/75/90/100% and can be customized per workspace or per quota. Each threshold fires at most once per billing cycle, and a higher threshold escalates (supersedes) a lower one. Alerts can be acknowledged or muted (1 day, 7 days, or until the cycle resets). Alerts resolve automatically when the condition clears. Each alert's deliveries are unique per channel, so retries can't duplicate notifications.
 - **Connection health.** Provider errors are normalized: auth failures pause collection until you reauthorize, missing permissions retry daily, and transient errors (429/5xx/network) back off exponentially. Data older than your freshness threshold raises a *stale* alert. Failures never erase data or read as zero usage.
 - **Costs.** Provider-reported spend is kept separate from calculated estimates. Each estimate carries its pricing rule and version, and currencies are never mixed.
+
+### Cost simulator
+
+`/simulator` estimates monthly costs for a workload you describe, without reading any connected account. Pick a preset, turn on the services in your stack (Supabase, Upstash Redis, Vercel, Cloudflare), and set where the API runs and where files live. Then adjust users, traffic, database queries, data sizes and growth.
+
+- **Engine.** `src/lib/engine/simulate/` is pure and deterministic: inputs → resolved stack → monthly usage → priced line items → a 12-month projection with events.
+- **Cache vs. compute.** Every month is priced both with and without a cache in front of the database. The verdict says whether a cache saves money (in compute size or Supabase egress), or whether a larger compute size is cheaper. Supabase doesn't publish query throughput, so the planning QPS per compute size is an editable assumption.
+- **Prices.** Price sheets in `catalog.ts` record their source and verification date. A sheet more than 90 days old is flagged as possibly outdated. Free-plan limits show as restrictions, never as charges.
+- **Sharing.** Inputs live in the URL (only values that differ from the preset), so a scenario can be bookmarked or shared.
 
 ### Supabase integration
 
@@ -107,10 +116,11 @@ Verified on 2026-10-09 against the Management API OpenAPI spec and the "Manage y
 
 ## Tests
 
-`npm test` runs 50 tests:
+`npm test` runs 142 tests:
 
 - **Engine**: cycles, aggregation, forecasting (including reset boundaries and reproducibility), costs, alert dedupe keys, health, units, and failure backoff.
 - **Supabase adapter**: mocked API covering parsing, per-metric failures, auth aborts, paused projects, retries and rate limits.
+- **Cost simulator**: price catalog structure, URL encoding and presets, stack routing, the workload model, pricing and unit conversions, compute choice and the cache verdict, events, and every preset against the real catalog.
 - **RLS isolation**: two real users against the local database. They check cross-workspace reads and writes, that credentials can't be read, that provider quotas can't be written by users, column grants, and the worker RPCs.
 
 ## Not yet built (later checkpoints)
