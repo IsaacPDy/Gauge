@@ -1,27 +1,22 @@
 import "server-only";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { createUserClient } from "./supabase/server";
+import { ensureUserWorkspace } from "@/db/bootstrap";
+import { requireWorkspace } from "@/db/scope";
+import { auth } from "@/lib/auth/server";
 
 /**
- * The signed-in user, their RLS-bound Supabase client and their workspace.
- * MVP: one workspace per user, created automatically at sign-up.
+ * The signed-in user, their workspace and a WorkspaceScope for querying it.
+ * MVP: one workspace per user, created on first sign-in.
  */
 export const getSession = cache(async () => {
-  const supabase = await createUserClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-  const { data: workspace, error } = await supabase
-    .from("workspaces")
-    .select("*")
-    .order("created_at")
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(`Could not load workspace: ${error.message}`);
-  if (!workspace) throw new Error("No workspace found for this account");
-  return { supabase, user, workspace };
+  const { data } = await auth.getSession();
+  const authUser = data?.user;
+  if (!authUser) redirect("/login");
+  const user = { id: authUser.id, email: authUser.email };
+  const workspace = await ensureUserWorkspace(user);
+  const scope = await requireWorkspace(user.id, workspace.id);
+  return { user, workspace, scope };
 });
 
 export type Session = Awaited<ReturnType<typeof getSession>>;
