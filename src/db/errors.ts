@@ -31,3 +31,23 @@ export function dbErrorMessage(error: unknown): string {
   }
   return "Database error";
 }
+
+const FRIENDLY_BY_SQLSTATE: Record<string, string> = {
+  "23505": "That already exists.",
+  "23503": "That item no longer exists or belongs to another workspace.",
+  "23514": "One of the values is not allowed.",
+  "22P02": "One of the values is not allowed.",
+  "22007": "One of the values is not allowed.",
+  "22023": "One of the values is not allowed.",
+  "22001": "One of the values is too long.",
+};
+
+/**
+ * Text that is safe to show a user for a failed database call: chosen from the SQLSTATE only,
+ * never from the driver message (which can name tables, constraints or values). Log the real
+ * cause separately with dbErrorMessage().
+ */
+export function friendlyDbError(error: unknown, fallback = "Something went wrong. Try again in a moment."): string {
+  const code = pgErrorCode(error);
+  return (code && FRIENDLY_BY_SQLSTATE[code]) || fallback;
+}

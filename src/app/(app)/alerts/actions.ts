@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { dbErrorMessage } from "@/db/errors";
+import { dbErrorMessage, friendlyDbError } from "@/db/errors";
 import type { Json } from "@/db/json";
 import * as alertsRepo from "@/db/repos/alerts";
 import { audit } from "@/lib/audit";
@@ -94,7 +94,8 @@ export async function saveAlertRules(form: FormData) {
     try {
       await alertsRepo.updateAlertRule(scope, rule.id, patch);
     } catch (e) {
-      failure = dbErrorMessage(e);
+      console.error("[alerts] could not save alert rules:", dbErrorMessage(e));
+      failure = friendlyDbError(e);
       break;
     }
   }

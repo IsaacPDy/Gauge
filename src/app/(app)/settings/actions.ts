@@ -4,13 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { deleteUserData } from "@/db/bootstrap";
-import { dbErrorMessage } from "@/db/errors";
+import { dbErrorMessage, friendlyDbError } from "@/db/errors";
 import * as account from "@/db/repos/account";
 import { listConnections } from "@/db/repos/inventory";
 import { audit } from "@/lib/audit";
 import { auth } from "@/lib/auth/server";
 import { clearAuthCookies } from "@/lib/auth/cookies";
-import { passwordChangeMessage } from "@/lib/auth/messages";
+import { deleteAccountMessage, passwordChangeMessage } from "@/lib/auth/messages";
 import { deleteCredentials } from "@/lib/jobs/credentials";
 import { oauthConfigured, revokeTokens } from "@/lib/providers/supabase/oauth";
 import { getSession } from "@/lib/session";
@@ -57,7 +57,8 @@ export async function updateNotifications(form: FormData) {
   try {
     await account.updateWorkspace(scope, { ...parsed.data!, alert_email: parsed.data!.alert_email || null });
   } catch (e) {
-    failure = dbErrorMessage(e);
+    console.error("[settings] could not save notification settings:", dbErrorMessage(e));
+    failure = friendlyDbError(e, "Could not save the notification settings. Try again in a moment.");
   }
   if (failure) fail(failure); // outside the try: redirect() works by throwing
   await audit({ workspaceId: workspace.id, actorId: user.id, action: "settings.notifications" });
@@ -83,21 +84,32 @@ export async function deleteAccount(form: FormData) {
   if (String(form.get("confirm") ?? "").trim().toLowerCase() !== (user.email ?? "").toLowerCase()) {
     fail("Type your email address exactly to confirm deletion.");
   }
+  // Read-only, and it needs the signed-in user, so it comes before the login is deleted.
   const connections = await listConnections(scope);
-  for (const c of connections) {
-    const creds = await deleteCredentials(c.id);
-    if (creds?.kind === "oauth" && oauthConfigured()) await revokeTokens(creds.refreshToken).catch(() => undefined);
-  }
-  await audit({ workspaceId: null, actorId: null, action: "account.deleted", details: { connectionsRevoked: connections.length } });
-  // Delete the login first: if Neon refuses, nothing of the user's data has been removed yet.
+  // Delete the login first: if Neon refuses (for example because the session is too old), nothing
+  // of the user's data has been touched and every connection keeps working.
   const { data, error } = await auth.deleteUser();
-  if (error) fail(`Could not delete the account: ${error.message ?? "unknown error"}`);
+  if (error) {
+    console.error("[account] login deletion refused:", error.status, error.code);
+    fail(deleteAccountMessage(error));
+  }
   if (data?.success === false) fail("Could not delete the account.");
+  // The login is gone, so nothing below may turn into an error page: the user cannot sign in to
+  // retry. Each step is best effort; data left behind is orphaned and would need a cleanup job.
+  let revoked = 0;
+  for (const c of connections) {
+    try {
+      const creds = await deleteCredentials(c.id);
+      if (creds?.kind === "oauth" && oauthConfigured()) await revokeTokens(creds.refreshToken).catch(() => undefined);
+      revoked++;
+    } catch (e) {
+      console.error("[account] could not remove credentials after login deletion:", dbErrorMessage(e), c.id);
+    }
+  }
+  await audit({ workspaceId: null, actorId: null, action: "account.deleted", details: { connectionsRevoked: revoked } }); // never throws
   // The SDK trusts its cached session cookie for up to 5 minutes; drop it so the deleted account
   // cannot be "resurrected" by ensureUserWorkspace() on the next request.
   await clearAuthCookies();
-  // The login is already gone, so a failure here must not become an error page: the user can no
-  // longer sign in to retry. Any data left behind is orphaned and would need a cleanup job.
   try {
     await deleteUserData(user.id);
   } catch (e) {

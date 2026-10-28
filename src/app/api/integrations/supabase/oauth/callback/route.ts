@@ -51,20 +51,25 @@ export async function GET(request: NextRequest) {
 
   let connectionId = saved.connection_id;
   if (connectionId) {
-    await saveCredentials({ id: connectionId, workspace_id: saved.workspace_id }, credentials);
-    await db
-      .update(provider_connections)
-      .set({
-        auth_method: "oauth",
-        status: "syncing",
-        status_detail: null,
-        status_changed_at: new Date().toISOString(),
-        granted_scopes: [...SUPABASE_SCOPES],
-        next_sync_at: new Date().toISOString(),
-        consecutive_failures: 0,
-        disconnected_at: null,
-      })
-      .where(and(eq(provider_connections.id, connectionId), eq(provider_connections.workspace_id, saved.workspace_id)));
+    try {
+      await saveCredentials({ id: connectionId, workspace_id: saved.workspace_id }, credentials);
+      await db
+        .update(provider_connections)
+        .set({
+          auth_method: "oauth",
+          status: "syncing",
+          status_detail: null,
+          status_changed_at: new Date().toISOString(),
+          granted_scopes: [...SUPABASE_SCOPES],
+          next_sync_at: new Date().toISOString(),
+          consecutive_failures: 0,
+          disconnected_at: null,
+        })
+        .where(and(eq(provider_connections.id, connectionId), eq(provider_connections.workspace_id, saved.workspace_id)));
+    } catch (e) {
+      console.error("[oauth] could not update the reauthorized connection:", dbErrorMessage(e));
+      return fail("Could not save the connection.");
+    }
     await audit({ workspaceId: saved.workspace_id, actorId: user.id, action: "connection.reauthorize", targetType: "provider_connection", targetId: connectionId });
   } else {
     let conn: { id: string; workspace_id: string } | undefined;
@@ -87,7 +92,14 @@ export async function GET(request: NextRequest) {
     }
     if (!conn) return fail("Could not save the connection.");
     connectionId = conn.id;
-    await saveCredentials(conn, credentials);
+    try {
+      await saveCredentials(conn, credentials);
+    } catch (e) {
+      console.error("[oauth] could not store the credentials:", dbErrorMessage(e));
+      // Do not leave a connection that has no credentials behind.
+      await db.delete(provider_connections).where(eq(provider_connections.id, conn.id)).catch(() => undefined);
+      return fail("Could not save the connection.");
+    }
     await audit({
       workspaceId: saved.workspace_id,
       actorId: user.id,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { passwordChangeMessage } from "@/lib/auth/messages";
+import { deleteAccountMessage, passwordChangeMessage } from "@/lib/auth/messages";
 
 const REJECTED = "The new password was rejected. Choose a longer or less common password.";
 
@@ -38,5 +38,19 @@ describe("passwordChangeMessage", () => {
   it("uses a generic message for anything else and never an empty one", () => {
     expect(passwordChangeMessage({ status: 403, message: "Forbidden" })).toBe("Could not change the password.");
     expect(passwordChangeMessage({})).toBe("Could not change the password.");
+  });
+});
+
+describe("deleteAccountMessage", () => {
+  it("asks for a fresh sign-in when the session is too old", () => {
+    const text = "For security, sign in again and then retry deleting your account.";
+    expect(deleteAccountMessage({ code: "SESSION_EXPIRED", status: 400, message: "x" })).toBe(text);
+    expect(deleteAccountMessage({ status: 400, message: "Session expired. Re-authenticate to perform this action." })).toBe(text);
+  });
+
+  it("never shows the upstream message otherwise", () => {
+    const text = "Could not delete the account. Try again in a moment.";
+    expect(deleteAccountMessage({ status: 500, message: "internal detail" })).toBe(text);
+    expect(deleteAccountMessage({})).toBe(text);
   });
 });

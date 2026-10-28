@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { z } from "zod";
-import { dbErrorMessage } from "@/db/errors";
+import { dbErrorMessage, friendlyDbError } from "@/db/errors";
 import type { Json } from "@/db/json";
 import * as applicationsRepo from "@/db/repos/applications";
 import * as inventory from "@/db/repos/inventory";
@@ -215,7 +215,8 @@ export async function assignResource(form: FormData) {
     try {
       await applicationsRepo.assignResources(scope, uuid.parse(appId), [resourceId]);
     } catch (e) {
-      throw new Error(`Could not assign resource: ${dbErrorMessage(e)}`);
+      console.error("[providers] could not assign resource:", dbErrorMessage(e));
+      throw new Error(`Could not assign resource: ${friendlyDbError(e)}`);
     }
   } else {
     await applicationsRepo.unassignResource(scope, resourceId);

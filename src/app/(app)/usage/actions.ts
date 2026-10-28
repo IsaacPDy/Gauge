@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { dbErrorMessage } from "@/db/errors";
+import { dbErrorMessage, friendlyDbError } from "@/db/errors";
 import type { Json } from "@/db/json";
 import * as inventory from "@/db/repos/inventory";
 import * as quotasRepo from "@/db/repos/quotas";
@@ -66,7 +66,8 @@ export async function saveQuota(_: QuotaFormState, form: FormData): Promise<Quot
   try {
     await quotasRepo.saveUserQuota(scope, { metric_key: metricKey, scope_type: scopeType, scopeId, unit: metric.unit }, row);
   } catch (e) {
-    return { error: `Could not save the limit: ${dbErrorMessage(e)}` };
+    console.error("[usage] could not save the limit:", dbErrorMessage(e));
+    return { error: `Could not save the limit: ${friendlyDbError(e)}` };
   }
 
   await audit({ workspaceId: workspace.id, actorId: user.id, action: "quota.save", targetType: "quota_rule", details: { metricKey, scopeType, scopeId, limit } });
@@ -115,7 +116,8 @@ export async function applyPlanAllowance(form: FormData) {
         },
       );
     } catch (e) {
-      failure ??= dbErrorMessage(e);
+      console.error("[usage] could not apply the plan allowance:", dbErrorMessage(e));
+      failure ??= friendlyDbError(e);
     }
   }
   if (failure) throw new Error(`Could not apply allowance: ${failure}`);

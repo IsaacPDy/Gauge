@@ -27,3 +27,11 @@ export function passwordChangeMessage(error: AuthErrorLike): string {
   }
   return "Could not change the password.";
 }
+
+/** Maps a failed `auth.deleteUser` call to text that is safe to show the user (never the upstream message). */
+export function deleteAccountMessage(error: AuthErrorLike): string {
+  if (/session[_ ]expired/i.test(`${error.code ?? ""} ${error.message ?? ""}`)) {
+    return "For security, sign in again and then retry deleting your account.";
+  }
+  return "Could not delete the account. Try again in a moment.";
+}

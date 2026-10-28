@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { isUniqueViolation, dbErrorMessage } from "@/db/errors";
+import { dbErrorMessage, friendlyDbError, isUniqueViolation } from "@/db/errors";
 import * as applicationsRepo from "@/db/repos/applications";
 import { recalculateWorkspace } from "@/lib/jobs/recalc";
 import { getSession } from "@/lib/session";
@@ -24,7 +24,8 @@ export async function createApplication(form: FormData) {
   try {
     id = await applicationsRepo.createApplication(scope, { name: parsed.data.name, description: parsed.data.description ?? null });
   } catch (e) {
-    failure = isUniqueViolation(e) ? "An application with that name already exists." : dbErrorMessage(e);
+    if (!isUniqueViolation(e)) console.error("[applications] could not create:", dbErrorMessage(e));
+    failure = isUniqueViolation(e) ? "An application with that name already exists." : friendlyDbError(e);
   }
   if (failure || !id) redirect(withParams("/applications", { error: failure ?? "Could not create the application." }));
   revalidatePath("/", "layout");
@@ -40,7 +41,8 @@ export async function updateApplication(form: FormData) {
   try {
     await applicationsRepo.updateApplication(scope, id, { name: parsed.data.name, description: parsed.data.description ?? null });
   } catch (e) {
-    failure = isUniqueViolation(e) ? "That name is already used." : dbErrorMessage(e);
+    if (!isUniqueViolation(e)) console.error("[applications] could not update:", dbErrorMessage(e));
+    failure = isUniqueViolation(e) ? "That name is already used." : friendlyDbError(e);
   }
   if (failure) redirect(withParams(`/applications/${id}`, { error: failure }));
   revalidatePath("/", "layout");
@@ -66,7 +68,8 @@ export async function addResources(form: FormData) {
     try {
       await applicationsRepo.assignResources(scope, applicationId, ids);
     } catch (e) {
-      failure = dbErrorMessage(e);
+      console.error("[applications] could not add resources:", dbErrorMessage(e));
+      failure = friendlyDbError(e);
     }
     if (failure) redirect(withParams(`/applications/${applicationId}`, { error: failure }));
     await recalculateWorkspace(workspace.id);

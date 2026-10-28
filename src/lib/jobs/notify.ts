@@ -7,6 +7,7 @@ import { alerts, notification_deliveries } from "../../db/schema";
 import { renderAlertEmail } from "../email/alert-email";
 import { sendEmail } from "../email/transport";
 import { getMetric, PROVIDER_NAMES } from "../providers/registry";
+import { appUrl } from "../urls";
 
 const MAX_ATTEMPTS = 5;
 
@@ -43,7 +44,7 @@ export async function deliverDueNotifications(): Promise<{ sent: number; failed:
         await sendEmail(
           renderAlertEmail({
             to: d.recipient,
-            appUrl: process.env.APP_URL ?? "http://localhost:3000",
+            appUrl: appUrl(),
             alert,
             metricName: alert.metric_key ? (getMetric(alert.metric_key)?.name ?? alert.metric_key) : null,
             providerLabel: conn ? `${PROVIDER_NAMES[conn.provider] ?? conn.provider} · ${conn.label}` : null,
