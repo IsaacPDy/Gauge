@@ -1,8 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
 import { Button } from "@/components/ui";
 
 export default function AppError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  // Next forwards browser errors to the dev log, so a failure like this can be diagnosed without DevTools.
+  useEffect(() => {
+    console.error("[app-error]", error.name, error.message, error.digest ?? "(no server digest)");
+  }, [error]);
   return (
     <div role="alert" className="mx-auto max-w-md rounded-lg border border-crit/30 bg-crit-soft p-6 text-center">
       <p className="font-medium text-crit">Something went wrong</p>

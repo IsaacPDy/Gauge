@@ -1,5 +1,5 @@
 import { formatCount } from "../../units";
-import { overageCost, round2 } from "../cost";
+import { graduatedCost, overageCost, round2 } from "../cost";
 import { type Catalog, type ComputeKey, computeSize, type PriceSheet, type Service, sheetFor } from "./catalog";
 import type { ResolvedStack } from "./stack";
 import type { MonthUsage } from "./workload";
@@ -96,7 +96,12 @@ function priceSheet(sheet: PriceSheet, usage: Record<string, number>, compute: C
       usage: used,
       included: item.includedQuantity,
       billable,
-      cost: item.unitPrice === null ? 0 : overageCost(used, { ...item, unitPrice: item.unitPrice }),
+      cost:
+        item.unitPrice === null
+          ? 0
+          : item.tiers
+            ? graduatedCost(used, item.includedQuantity, item.tiers, item.unitSize)
+            : overageCost(used, { ...item, unitPrice: item.unitPrice }),
       restricted: item.unitPrice === null && billable > 0,
       note: [item.note, keysNote].filter(Boolean).join(" ") || undefined,
     });

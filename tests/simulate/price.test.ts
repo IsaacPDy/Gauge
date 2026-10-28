@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { graduatedCost } from "@/lib/engine/cost";
+import type { Catalog } from "@/lib/engine/simulate/catalog";
 import { priceMonth } from "@/lib/engine/simulate/price";
 import { ROUTING_CATALOG, stackWith, TEST_CATALOG, zeroUsage } from "./fixtures";
 
@@ -97,5 +99,57 @@ describe("priceMonth", () => {
   it("produces no items for services that are off", () => {
     const items = priceMonth(zeroUsage(), stackWith({ supabase: "off", vercel: "off" }), null, TEST_CATALOG);
     expect(items).toEqual([]);
+  });
+});
+
+const MAU_TIERS = [
+  { upTo: 100_000, unitPrice: 0.0055 },
+  { upTo: 1_000_000, unitPrice: 0.0046 },
+  { upTo: 10_000_000, unitPrice: 0.0032 },
+  { upTo: null, unitPrice: 0.0025 },
+];
+
+describe("graduatedCost", () => {
+  it("charges nothing within the included quantity", () => {
+    expect(graduatedCost(40_000, 50_000, MAU_TIERS)).toBe(0);
+  });
+
+  it("charges each tier's price for the units inside it", () => {
+    expect(graduatedCost(80_000, 50_000, MAU_TIERS)).toBe(165);
+    // Google's own worked examples on the Identity Platform pricing page.
+    expect(graduatedCost(131_000, 50_000, MAU_TIERS)).toBe(417.6);
+    expect(graduatedCost(225_000, 50_000, MAU_TIERS)).toBe(850);
+  });
+
+  it("uses the unbounded last tier", () => {
+    expect(graduatedCost(12_000_000, 50_000, MAU_TIERS)).toBe(38_215);
+  });
+
+  it("starts billing at the included quantity when it sits above the first boundary", () => {
+    expect(graduatedCost(200_000, 150_000, MAU_TIERS)).toBe(230);
+  });
+
+  it("prices per unit size", () => {
+    expect(graduatedCost(5_000_000, 2_000_000, [{ upTo: null, unitPrice: 0.4 }], 1_000_000)).toBe(1.2);
+  });
+});
+
+describe("priceMonth with tiers", () => {
+  it("prices a tiered item with graduatedCost", () => {
+    const catalog: Catalog = {
+      ...TEST_CATALOG,
+      sheets: TEST_CATALOG.sheets.map((s) =>
+        s.service === "supabase" && s.plan === "pro"
+          ? {
+              ...s,
+              items: s.items.map((i) =>
+                i.key === "mau" ? { ...i, tiers: [{ upTo: 200_000, unitPrice: 0.00325 }, { upTo: null, unitPrice: 0.001 }] } : i,
+              ),
+            }
+          : s,
+      ),
+    };
+    const items = priceMonth(zeroUsage({ mau: 250_000 }), stackWith(), "micro", catalog);
+    expect(items.find((i) => i.service === "supabase" && i.key === "mau")?.cost).toBe(375);
   });
 });

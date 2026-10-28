@@ -20,8 +20,8 @@ export default async function ResourcesPage({ searchParams }: PageProps<"/provid
   const monitored = str(sp.monitored);
   const app = str(sp.app);
 
-  const { supabase } = await getSession();
-  const inv = await loadInventory(supabase);
+  const { scope } = await getSession();
+  const inv = await loadInventory(scope);
   const rows = inv.resources.filter((r) => {
     const conn = inv.connectionById.get(r.connection_id);
     const account = inv.accountById.get(r.account_id ?? "");

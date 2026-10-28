@@ -1,4 +1,6 @@
-import { adminClient } from "../supabase/admin";
+import { db } from "../../db/client";
+import { metric_definitions, pricing_rules } from "../../db/schema";
+import { excludedFrom } from "../../db/sql";
 import { allMetricDefinitions, allPricingRules } from "../providers/registry";
 
 let synced: Promise<void> | null = null;
@@ -9,7 +11,7 @@ let synced: Promise<void> | null = null;
  */
 export function ensureReferenceData(): Promise<void> {
   synced ??= (async () => {
-    const admin = adminClient();
+    const updated_at = new Date().toISOString();
     const metrics = allMetricDefinitions().map((m) => ({
       key: m.key,
       provider: m.provider,
@@ -21,10 +23,14 @@ export function ensureReferenceData(): Promise<void> {
       derivation: m.derivation,
       supported: m.supported,
       unsupported_reason: m.unsupportedReason ?? null,
-      updated_at: new Date().toISOString(),
+      updated_at,
     }));
-    const { error: mErr } = await admin.from("metric_definitions").upsert(metrics, { onConflict: "key" });
-    if (mErr) throw new Error(`Syncing metric definitions failed: ${mErr.message}`);
+    if (metrics.length) {
+      await db
+        .insert(metric_definitions)
+        .values(metrics)
+        .onConflictDoUpdate({ target: metric_definitions.key, set: excludedFrom(metric_definitions, metrics, ["key"]) });
+    }
 
     const rules = allPricingRules().map((r) => ({
       id: r.id,
@@ -40,10 +46,14 @@ export function ensureReferenceData(): Promise<void> {
       source_url: r.sourceUrl ?? null,
       verified_at: r.verifiedAt,
       notes: r.notes ?? null,
-      updated_at: new Date().toISOString(),
+      updated_at,
     }));
-    const { error: pErr } = await admin.from("pricing_rules").upsert(rules, { onConflict: "id" });
-    if (pErr) throw new Error(`Syncing pricing rules failed: ${pErr.message}`);
+    if (rules.length) {
+      await db
+        .insert(pricing_rules)
+        .values(rules)
+        .onConflictDoUpdate({ target: pricing_rules.id, set: excludedFrom(pricing_rules, rules, ["id"]) });
+    }
   })().catch((e) => {
     synced = null; // retry next time
     throw e;

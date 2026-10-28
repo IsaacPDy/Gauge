@@ -5,17 +5,20 @@ export type PresetKey = (typeof PRESETS)[number];
 export const DEFAULT_PRESET: PresetKey = "small_saas";
 
 export type SupabaseChoice = "off" | "free" | "pro" | "team";
+export type FirebaseChoice = "off" | "spark" | "blaze";
+export type Backend = "supabase" | "firebase";
 export type CacheChoice = "off" | "upstash_payg";
 export type VercelChoice = "off" | "hobby" | "pro";
 export type CloudflareChoice = "off" | "free" | "paid";
 export type Host = "vercel" | "cloudflare" | "direct";
-export type FileStore = "supabase" | "r2";
+export type FileStore = "supabase" | "r2" | "firebase";
 
 export const HOSTS: Host[] = ["vercel", "cloudflare", "direct"];
+export const BACKENDS: Backend[] = ["supabase", "firebase"];
 export const HOST_LABELS: Record<Host, string> = {
   vercel: "Vercel",
   cloudflare: "Cloudflare Workers",
-  direct: "Client calls Supabase directly",
+  direct: "Client calls the backend directly",
 };
 
 export interface SimInputs {
@@ -23,6 +26,9 @@ export interface SimInputs {
   // Stack
   supabase: SupabaseChoice;
   compute: "auto" | ComputeKey;
+  firebase: FirebaseChoice;
+  /** Which backend holds the database when Supabase and Firebase are both on. */
+  db: Backend;
   cache: CacheChoice;
   vercel: VercelChoice;
   seats: number;
@@ -68,7 +74,7 @@ export const FIELD_GROUPS: { key: Exclude<FieldGroup, "stack">; label: string }[
 ];
 
 export type NumberKey = { [K in keyof SimInputs]-?: SimInputs[K] extends number | null ? K : never }[keyof SimInputs];
-export type EnumKey = "supabase" | "compute" | "cache" | "vercel" | "cloudflare" | "host" | "fileStore";
+export type EnumKey = "supabase" | "compute" | "firebase" | "db" | "cache" | "vercel" | "cloudflare" | "host" | "fileStore";
 
 export interface NumberField {
   kind: "number";
@@ -106,11 +112,13 @@ function choice(name: EnumKey, url: string, label: string, options: [string, str
 export const ENUM_FIELDS: EnumField[] = [
   choice("supabase", "sb", "Supabase", [["off", "Off"], ["free", "Free"], ["pro", "Pro"], ["team", "Team"]]),
   choice("compute", "cmp", "Database compute", [["auto", "Auto (smallest that fits)"], ...CATALOG.compute.map((c): [string, string] => [c.key, c.label])]),
+  choice("firebase", "fb", "Firebase", [["off", "Off"], ["spark", "Spark (no cost)"], ["blaze", "Blaze (pay as you go)"]]),
+  choice("db", "db", "Database", [["supabase", "Supabase"], ["firebase", "Firebase (Firestore)"]]),
   choice("cache", "ca", "Cache", [["off", "Off"], ["upstash_payg", "Upstash Redis (pay as you go)"]]),
   choice("vercel", "vc", "Vercel", [["off", "Off"], ["hobby", "Hobby"], ["pro", "Pro"]]),
   choice("cloudflare", "cf", "Cloudflare", [["off", "Off"], ["free", "Workers Free"], ["paid", "Workers Paid"]]),
   choice("host", "host", "API runs on", HOSTS.map((h): [string, string] => [h, HOST_LABELS[h]])),
-  choice("fileStore", "fs", "File storage", [["supabase", "Supabase Storage"], ["r2", "Cloudflare R2"]]),
+  choice("fileStore", "fs", "File storage", [["supabase", "Supabase Storage"], ["r2", "Cloudflare R2"], ["firebase", "Cloud Storage for Firebase"]]),
 ];
 
 export const NUMBER_FIELDS: NumberField[] = [
@@ -151,7 +159,7 @@ export const PRESET_INFO: Record<PresetKey, { label: string; description: string
 };
 
 const ASSUMPTIONS = { headroomPct: 70, queryMs: 5, cacheValueKB: 2, cachedKeysPct: 10, avgFileMB: 0.5 };
-const ROUTING = { compute: "auto", cloudflare: "off", host: "vercel", fileStore: "supabase", dbQueriesOverride: null } as const;
+const ROUTING = { compute: "auto", firebase: "off", db: "supabase", cloudflare: "off", host: "vercel", fileStore: "supabase", dbQueriesOverride: null } as const;
 
 const PRESET_VALUES: Record<PresetKey, SimInputs> = {
   side_project: {

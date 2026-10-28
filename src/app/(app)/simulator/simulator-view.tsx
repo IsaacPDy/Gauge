@@ -2,7 +2,9 @@
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useCurrency } from "@/components/currency";
 import { Notice } from "@/components/ui";
+import { formatUsdAs } from "@/lib/currency";
 import { simulate } from "@/lib/engine/simulate";
 import { decode, encode, type PresetKey, presetInputs, type SimInputs } from "@/lib/engine/simulate/inputs";
 import { SimulatorForm } from "./simulator-form";
@@ -16,7 +18,8 @@ export function SimulatorView({ initialNotices, now }: { initialNotices: string[
   const [inputs, setInputs] = useState(() => decode(Object.fromEntries(params)).inputs);
   const [urlNotices, setUrlNotices] = useState(initialNotices);
   const [month, setMonth] = useState(1);
-  const result = useMemo(() => simulate(inputs, { now: new Date(now) }), [inputs, now]);
+  const display = useCurrency();
+  const result = useMemo(() => simulate(inputs, { now: new Date(now), money: (n) => formatUsdAs(n, display) }), [inputs, now, display]);
   const query = encode(inputs);
   const edited = query !== encode(presetInputs(inputs.preset));
 

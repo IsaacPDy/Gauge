@@ -56,7 +56,7 @@ export function renderAlertEmail(input: AlertEmailInput): EmailMessage {
   const link = `${input.appUrl}/alerts/${a.id}`;
   const severity = SEVERITY_LABEL[a.severity] ?? a.severity;
   const disclaimer =
-    "CloudWatch alerts are monitoring notices, not spending caps. Estimates can differ from your provider's invoice, which is authoritative.";
+    "Limit Gauge alerts are monitoring notices, not spending caps. Estimates can differ from your provider's invoice, which is authoritative.";
 
   const text = [
     `${severity}: ${a.title}`,
@@ -75,7 +75,7 @@ export function renderAlertEmail(input: AlertEmailInput): EmailMessage {
   const html = `<!doctype html><html><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#111827;background:#f9fafb;padding:24px">
 <table role="presentation" style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:24px">
 <tr><td>
-<p style="margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280">CloudWatch · ${esc(severity)}</p>
+<p style="margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280">Limit Gauge · ${esc(severity)}</p>
 <h1 style="margin:0 0 12px;font-size:18px">${esc(a.title)}</h1>
 <p style="margin:0 0 16px;line-height:1.5">${esc(a.message)}</p>
 <table role="presentation" style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px">
@@ -86,5 +86,5 @@ ${a.recommended_action ? `<p style="margin:0 0 16px;line-height:1.5"><strong>Rec
 <p style="margin:0;font-size:12px;color:#6b7280">${esc(disclaimer)}</p>
 </td></tr></table></body></html>`;
 
-  return { to: input.to, subject: `[CloudWatch] ${severity}: ${a.title}`, text, html };
+  return { to: input.to, subject: `[Limit Gauge] ${severity}: ${a.title}`, text, html };
 }

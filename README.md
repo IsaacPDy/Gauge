@@ -1,25 +1,27 @@
-# CloudWatch — unified cloud usage & cost monitoring
+# Limit Gauge — unified cloud usage & cost monitoring
 
-CloudWatch connects to your cloud accounts with read-only access, discovers your projects, collects usage on a schedule, compares it against provider-reported or user-configured limits, forecasts the end of the billing cycle, and warns you (in-app and by email) before you hit a limit or an unexpected bill.
+Limit Gauge connects to your cloud accounts with read-only access, discovers your projects, collects usage on a schedule, compares it against provider-reported or user-configured limits, forecasts the end of the billing cycle, and warns you (in-app and by email) before you hit a limit or an unexpected bill.
 
 It implements checkpoints 1–6 of the PRD (`writing-block.md`): the full MVP definition of done, plus forecasting and cost estimates. Supabase is the first real integration. A clearly labelled **Demo provider** (development only) generates sample data so you can explore the whole product without credentials.
 
-> CloudWatch monitors and forecasts. It never shuts down services, changes plans or caps spending, and every estimate is labelled as one.
+> Limit Gauge monitors and forecasts. It never shuts down services, changes plans or caps spending, and every estimate is labelled as one.
 
 ## Quick start (local)
 
-Prerequisites: Node 20.9+, Docker Desktop (running), and the Supabase CLI.
+Prerequisites: Node 20.12+ and a free Neon account (https://neon.com). Set up Neon first (see [Neon setup](#neon-setup)), then:
 
 ```bash
 npm install
 ```
 
 ```bash
-npm run db:start
+npm run setup:env
 ```
 
+`setup:env` creates `.env.local` and generates the secrets. Open it and fill in the values from the Neon console (`DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `NEON_AUTH_BASE_URL`, and `NEON_BRANCH=dev`). Then:
+
 ```bash
-npm run setup:env
+npm run db:migrate
 ```
 
 ```bash
@@ -31,9 +33,37 @@ Then open http://localhost:3100. The app uses port 3100 so it does not collide w
 1. Create an account. A private workspace is created automatically.
 2. **Providers → Add demo connection** (or **Connect Supabase** with a personal access token or OAuth).
 3. Choose the resources to monitor. Usage history appears within seconds.
-4. Explore **Home**, **Usage**, **Limits & quotas** and **Alerts**. Alert emails land in the local Mailpit inbox at http://127.0.0.1:54324.
+4. Explore **Home**, **Usage**, **Limits & quotas** and **Alerts**. In development alert emails are printed to the server log (`EMAIL_TRANSPORT=console`).
 
-`setup:env` writes `.env.local` from `supabase status` and generates the credential encryption key and cron secret. It keeps existing values, so it is safe to re-run. A local test account's credentials are stored in `.env.local` (`TEST_USER_*`).
+`setup:env` copies the keys from `.env.example` and generates the credential encryption key, cron secret and auth cookie secret. It keeps existing values, so it is safe to re-run.
+
+### Neon setup
+
+1. In the Neon console create a project and a branch named `dev`.
+2. On that branch open **Auth** and enable it.
+3. Copy these values into `.env.local`:
+
+| Variable | Where it comes from |
+|---|---|
+| `DATABASE_URL` | **Connect** with connection pooling **on** (the pooled string) |
+| `DATABASE_URL_UNPOOLED` | **Connect** with connection pooling **off** (the direct string). Migrations and `db:reset` use it |
+| `NEON_AUTH_BASE_URL` | **Auth → Configuration** (the Auth URL) |
+| `NEON_BRANCH` | A label you choose. `db:reset` only runs when it is `dev` |
+
+4. In **Auth** add `http://localhost:3100` as a trusted origin. Leave **Allow Localhost** on for development.
+5. In development, Neon Auth sends verification and password-reset emails through Neon's shared sender. That sender is meant for development only.
+
+Safari does not store the auth cookies over plain HTTP on localhost. Run `npm run dev -- --experimental-https` and open the https address it prints.
+
+**"An unexpected response was received from the server" when you submit a form (HTTP 431).** Cookies on `localhost` are shared by every app and port, so a browser profile that has run many local apps (old Supabase `sb-*-auth-token` cookies are the usual culprits) can send more than Node's default 16 KB of request headers. Node then rejects the request before the app sees it. `npm run dev` raises the limit to 64 KB, but the cleaner fix is to delete the stale `localhost` cookies in DevTools (Application > Cookies), or to use a separate browser profile for local development.
+
+### Changing the schema
+
+1. Add a new `db/migrations/NNNN_name.sql` (never edit an applied migration).
+2. Update `src/db/schema.ts` to match.
+3. Run `npm run db:migrate`.
+
+The schema parity test (`tests/db/schema-parity.test.ts`) fails when the Drizzle schema and the migrated database drift apart.
 
 ### Scripts
 
@@ -41,10 +71,10 @@ Then open http://localhost:3100. The app uses port 3100 so it does not collide w
 |---|---|
 | `npm run dev` | Next.js dev server on :3100. With `RUN_SCHEDULER_IN_PROCESS=true` it also runs collection and alert delivery every 60 s |
 | `npm run worker` / `worker:once` | Standalone scheduler loop / single pass (for production-style setups) |
-| `npm test` | Unit tests plus RLS isolation tests (the latter run when the local Supabase stack is up) |
+| `npm test` | Unit tests, plus database integration tests when `DATABASE_URL_TEST` is set (see [Tests](#tests)) |
 | `npm run typecheck` | TypeScript check |
-| `npm run db:reset` | Re-create the local database from `supabase/migrations` |
-| `npm run db:types` | Regenerate `src/lib/supabase/database.types.ts` after schema changes |
+| `npm run db:migrate` | Apply `db/migrations/*.sql` to the branch in `DATABASE_URL_UNPOOLED` |
+| `npm run db:reset -- --yes --host=<host>` | Wipe and re-create the app schema on the branch in `DATABASE_URL_UNPOOLED`. Refuses unless `NEON_BRANCH=dev`, `--yes` is given and `--host` equals that URL's host. On a mismatch it prints the actual host and the command to retype |
 
 ## Architecture
 
@@ -52,7 +82,7 @@ Then open http://localhost:3100. The app uses port 3100 so it does not collide w
 Provider APIs ──▶ Adapters (src/lib/providers) ──▶ Sync job (jobs/sync.ts)
                                                      │  idempotent upserts
                                                      ▼
-                                     PostgreSQL (Supabase, RLS per workspace)
+                                     PostgreSQL (Neon, workspace-scoped repositories)
                                                      │
                      Recalculation (jobs/recalc.ts): quota evaluations, forecasts,
                      cost estimates, alert evaluation, dedupe/escalation, delivery queue
@@ -65,7 +95,7 @@ Provider APIs ──▶ Adapters (src/lib/providers) ──▶ Sync job (jobs/sy
 
 | Area | Where | Notes |
 |---|---|---|
-| Schema, RLS, privileges | `supabase/migrations/` | Every workspace table is RLS-scoped. Users get only column-level grants they need. `provider_credentials` and `oauth_states` have no grants at all. |
+| Schema and access control | `db/migrations/`, `src/db/` | SQL-first migrations; a Drizzle schema for typed queries. Access control lives in `src/db/scope.ts`: every user-facing query goes through a repository in `src/db/repos/` that needs a `WorkspaceScope`. Repositories never touch `provider_credentials` or `oauth_states`. |
 | Provider adapters | `src/lib/providers/` | Common interface with a declared capability model. Unsupported data is reported as `unsupported`, never invented or shown as zero. |
 | Pure engine | `src/lib/engine/` | Billing cycles, usage aggregation (gauge / cumulative / incremental), forecasting, cost estimates, alert evaluation and connection health. Deterministic and unit-tested. |
 | Jobs | `src/lib/jobs/` | Sync (discover → collect → persist), recalculation, notifications, scheduler. Connections are claimed with `FOR UPDATE SKIP LOCKED`, so workers can run in parallel. |
@@ -110,18 +140,26 @@ Verified on 2026-10-09 against the Management API OpenAPI spec and the "Manage y
 
 ## Deploying
 
-1. **Database.** Create a Supabase project, then run `supabase link` and `supabase db push`. In Auth settings, enable email confirmations, set the Site URL to your domain, and configure SMTP.
-2. **App.** Deploy to Vercel or any Node host, with these env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `APP_URL`, `CREDENTIALS_ENCRYPTION_KEY`, `CRON_SECRET`, the email settings (`EMAIL_TRANSPORT=resend` + `RESEND_API_KEY`, or SMTP), and optionally the Supabase OAuth credentials. Set `ENABLE_DEMO_PROVIDER=false` and `RUN_SCHEDULER_IN_PROCESS=false`.
-3. **Scheduling.** `vercel.json` calls `/api/cron/tick` every 15 minutes, and Vercel sends `Authorization: Bearer $CRON_SECRET` automatically. Vercel's Hobby plan only allows daily crons. Elsewhere, run `npm run worker` as a separate process, or have any scheduler call the endpoint with the bearer token. Each connection's collection interval defaults to 6 hours.
+1. **Database and auth.** In Neon, use the `main` branch for production. Apply the schema by hand, before deploying code that needs it: `DATABASE_URL_UNPOOLED=<main direct url> npm run db:migrate`. In the branch's Auth settings add your production domain as a trusted origin, set up a custom email provider, and enable email verification (see Neon's auth production checklist).
+2. **App.** Deploy to Vercel or any Node host, with these env vars: `DATABASE_URL` (the **pooled** URL), `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, `APP_URL`, `CREDENTIALS_ENCRYPTION_KEY`, `CRON_SECRET`, the email settings (`EMAIL_TRANSPORT=resend` + `RESEND_API_KEY`, or SMTP), and optionally the Supabase OAuth credentials. Set `ENABLE_DEMO_PROVIDER=false` and `RUN_SCHEDULER_IN_PROCESS=false`.
+   - `NEON_AUTH_BASE_URL` and `NEON_AUTH_COOKIE_SECRET` (32+ characters) are needed at **build** time too: the Auth SDK validates them when it is imported.
+   - `APP_URL` is mandatory in production; the app throws without it.
+   - Do not enable Neon's Data API. The tables have no row-level security; authorization lives in the app's workspace scopes (`src/db/scope.ts`).
+   - `SUPABASE_MANAGEMENT_API_URL` is an optional override for the Supabase adapter's API base URL (default `https://api.supabase.com`).
+3. **Scheduling.** `vercel.json` calls `/api/cron/tick` once a day at 06:00 UTC, and Vercel sends `Authorization: Bearer $CRON_SECRET` automatically. That is the most often Vercel's Hobby plan allows (a more frequent schedule makes the deployment fail), so each connection is collected about once a day and alerts are evaluated once a day. On Vercel Pro, change the schedule to `*/15 * * * *` for near-real-time monitoring. Elsewhere, run `npm run worker` as a separate process, or have any scheduler call the endpoint with the bearer token. Each connection's collection interval defaults to 6 hours.
+
+**Session caching.** The Auth SDK trusts its session cache cookie for about 5 minutes. After you delete an account or revoke a session, another device may keep working for up to that long.
 
 ## Tests
 
-`npm test` runs 142 tests:
+`npm test` runs the unit tests and, when `DATABASE_URL_TEST` is set, the database integration tests:
 
 - **Engine**: cycles, aggregation, forecasting (including reset boundaries and reproducibility), costs, alert dedupe keys, health, units, and failure backoff.
 - **Supabase adapter**: mocked API covering parsing, per-metric failures, auth aborts, paused projects, retries and rate limits.
 - **Cost simulator**: price catalog structure, URL encoding and presets, stack routing, the workload model, pricing and unit conversions, compute choice and the cache verdict, events, and every preset against the real catalog.
-- **RLS isolation**: two real users against the local database. They check cross-workspace reads and writes, that credentials can't be read, that provider quotas can't be written by users, column grants, and the worker RPCs.
+- **Database** (needs `DATABASE_URL_TEST`): schema parity with the migrations, workspace bootstrap, and workspace isolation of the repositories. They run on the Neon branch in `DATABASE_URL_TEST`, which may be the same as the dev branch; they create and delete their own random test users and leave other data alone.
+
+While the tests run, do not run `npm run worker` or set `RUN_SCHEDULER_IN_PROCESS=true`: the scheduler would process the test data. If the dev branch holds data you care about, point `DATABASE_URL_TEST` at a separate Neon branch.
 
 ## Not yet built (later checkpoints)
 

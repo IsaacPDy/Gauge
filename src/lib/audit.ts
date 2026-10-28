@@ -1,5 +1,8 @@
-import type { Json } from "./supabase/database.types";
-import { adminClient } from "./supabase/admin";
+import { and, count, eq, gte, inArray } from "drizzle-orm";
+import { db } from "../db/client";
+import { dbErrorMessage } from "../db/errors";
+import type { Json } from "../db/json";
+import { audit_logs } from "../db/schema";
 
 /** Record a security-relevant action. Never pass secrets in `details`. */
 export async function audit(entry: {
@@ -10,9 +13,8 @@ export async function audit(entry: {
   targetId?: string;
   details?: Record<string, unknown>;
 }) {
-  const { error } = await adminClient()
-    .from("audit_logs")
-    .insert({
+  try {
+    await db.insert(audit_logs).values({
       workspace_id: entry.workspaceId,
       actor_id: entry.actorId,
       action: entry.action,
@@ -20,5 +22,16 @@ export async function audit(entry: {
       target_id: entry.targetId ?? null,
       details: (entry.details ?? {}) as Json,
     });
-  if (error) console.error(`[audit] failed to record ${entry.action}: ${error.message}`);
+  } catch (e) {
+    console.error(`[audit] failed to record ${entry.action}: ${dbErrorMessage(e)}`);
+  }
+}
+
+/** How many audit entries with one of `actions` the workspace has recorded since `sinceIso`. */
+export async function countRecentAudits(workspaceId: string, actions: string[], sinceIso: string): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(audit_logs)
+    .where(and(eq(audit_logs.workspace_id, workspaceId), inArray(audit_logs.action, actions), gte(audit_logs.created_at, sinceIso)));
+  return row.n;
 }

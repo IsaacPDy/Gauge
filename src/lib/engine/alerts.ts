@@ -128,7 +128,7 @@ const FAILURE_TEXT: Partial<Record<ConnectionStatus, { title: string; action: st
   },
   error: {
     title: "is failing to sync",
-    action: "Check the provider's status page. CloudWatch retries automatically with backoff; reconnect if the problem persists.",
+    action: "Check the provider's status page. Limit Gauge retries automatically with backoff; reconnect if the problem persists.",
     severity: "warning",
   },
   unsupported_capability: {
@@ -288,7 +288,7 @@ export function evaluateAlerts(input: EvaluationInput): EvaluationResult {
           dedupeKey: `${group}:${c.status}:${c.statusChangedAt.toISOString()}`,
           title: `${c.providerName} connection “${c.label}” ${failure.title}`,
           message:
-            `${c.statusDetail ?? "The provider rejected CloudWatch's request."} ` +
+            `${c.statusDetail ?? "The provider rejected Limit Gauge's request."} ` +
             `Usage shown for this connection is no longer current; missing data is not treated as zero usage.`,
           recommendedAction: failure.action,
           details: { status: c.status },

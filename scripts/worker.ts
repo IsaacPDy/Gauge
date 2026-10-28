@@ -1,4 +1,5 @@
 // Standalone worker: `npm run worker` (loop) or `npm run worker:once` (single pass).
+import { dbErrorMessage } from "../src/db/errors";
 import { runSchedulerTick } from "../src/lib/jobs/scheduler";
 
 const once = process.argv.includes("--once");
@@ -12,7 +13,7 @@ async function tick() {
       `[worker] synced=${s.synced.length} recalculated=${s.recalculated} emails sent=${s.delivered.sent} failed=${s.delivered.failed} (${Date.now() - started}ms)`,
     );
   } catch (e) {
-    console.error("[worker] tick failed:", e);
+    console.error("[worker] tick failed:", dbErrorMessage(e));
   }
 }
 

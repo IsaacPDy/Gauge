@@ -5,6 +5,7 @@ import { RiskLabel, SeverityBadge } from "@/components/status";
 import { Badge, Card, CardBody, CardHeader, EmptyState, Flash, Input, Label, PageHeader } from "@/components/ui";
 import { loadInventory, loadQuotaViews } from "@/lib/data/views";
 import { PROVIDER_NAMES } from "@/lib/providers/registry";
+import { listAlerts } from "@/db/repos/alerts";
 import { getSession } from "@/lib/session";
 import { createApplication } from "./actions";
 
@@ -12,10 +13,10 @@ export const metadata = { title: "Applications" };
 
 export default async function ApplicationsPage({ searchParams }: PageProps<"/applications">) {
   const sp = await searchParams;
-  const { supabase } = await getSession();
-  const inv = await loadInventory(supabase);
-  const quotas = await loadQuotaViews(supabase, inv);
-  const { data: openAlerts } = await supabase.from("alerts").select("id, application_id, resource_id, severity, title, created_at").eq("status", "open").order("created_at", { ascending: false });
+  const { scope } = await getSession();
+  const inv = await loadInventory(scope);
+  const quotas = await loadQuotaViews(scope, inv);
+  const openAlerts = await listAlerts(scope, { statuses: ["open"], limit: 1000 });
 
   return (
     <>

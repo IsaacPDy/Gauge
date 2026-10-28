@@ -1,34 +1,29 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { auth } from "@/lib/auth/server";
+import { isPublicPath } from "@/lib/auth/paths";
 
-const PUBLIC_PATHS = ["/login", "/signup", "/forgot-password", "/auth", "/api/cron", "/api/integrations"];
+const LOGIN = "/login";
+const sdkMiddleware = auth.middleware({ loginUrl: LOGIN });
 
-// Refreshes the Supabase session cookie on every request and keeps signed-out users
-// away from app pages. Authorization itself is enforced by RLS and server checks.
+// Keeps signed-out users away from app pages. Authorization itself is enforced by workspace
+// scopes (src/db/scope.ts) and server checks. The SDK middleware also refreshes its session cache
+// cookies where they are writable.
 export async function proxy(request: NextRequest) {
-  let response = NextResponse.next({ request });
-  const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    cookies: {
-      getAll: () => request.cookies.getAll(),
-      setAll: (toSet) => {
-        for (const { name, value } of toSet) request.cookies.set(name, value);
-        response = NextResponse.next({ request });
-        for (const { name, value, options } of toSet) response.cookies.set(name, value, options);
-      },
-    },
-  });
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   const path = request.nextUrl.pathname;
-  const isPublic = path === "/" || PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
-  if (!user && !isPublic) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.search = `?next=${encodeURIComponent(path + request.nextUrl.search)}`;
-    return NextResponse.redirect(url);
+  if (isPublicPath(path)) return NextResponse.next();
+
+  const response = await sdkMiddleware(request);
+
+  // The SDK redirects signed-out users to the login URL; keep the return path (?next=).
+  const location = response.headers.get("location");
+  if (response.status >= 300 && response.status < 400 && location) {
+    const target = new URL(location, request.nextUrl.origin);
+    if (target.origin === request.nextUrl.origin && target.pathname === LOGIN) {
+      target.search = `?next=${encodeURIComponent(path + request.nextUrl.search)}`;
+      const redirect = NextResponse.redirect(target);
+      for (const cookie of response.headers.getSetCookie()) redirect.headers.append("Set-Cookie", cookie);
+      return redirect;
+    }
   }
   return response;
 }

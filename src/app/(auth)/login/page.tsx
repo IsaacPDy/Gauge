@@ -6,7 +6,7 @@ import { AuthForm } from "../auth-form";
 export const metadata = { title: "Sign in" };
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const { next, error, deleted } = await searchParams;
+  const { next, error, deleted, reset } = await searchParams;
   return (
     <>
       <h1 className="mb-1 text-lg font-semibold">Sign in</h1>
@@ -14,6 +14,11 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
       {deleted ? (
         <div className="mb-4">
           <Notice tone="ok">Your account and all monitoring data were deleted.</Notice>
+        </div>
+      ) : null}
+      {reset ? (
+        <div className="mb-4">
+          <Notice tone="ok">Password updated. Sign in with your new password.</Notice>
         </div>
       ) : null}
       {typeof error === "string" ? (

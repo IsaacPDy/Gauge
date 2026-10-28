@@ -21,9 +21,11 @@ import { isStale } from "@/lib/engine/health";
 import { billingCycle, DAY_MS, dayKey, startOfUtcDay } from "@/lib/engine/time";
 import { currentUsage } from "@/lib/engine/usage";
 import { getAdapter, getMetric, PROVIDER_NAMES } from "@/lib/providers/registry";
+import { formatCost } from "@/lib/currency";
+import { getDisplay } from "@/lib/currency-server";
 import { getSession } from "@/lib/session";
 import type { MetricDefinition } from "@/lib/types";
-import { formatMoney, formatPercent, formatValue } from "@/lib/units";
+import { formatPercent, formatValue } from "@/lib/units";
 import { applyPlanAllowance, deleteQuota } from "./actions";
 import { QuotaForm } from "./quota-form";
 
@@ -50,9 +52,10 @@ function scopeOptions(inv: Inventory, metric: MetricDefinition) {
 
 export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
   const sp = await searchParams;
-  const { supabase, workspace } = await getSession();
-  const inv = await loadInventory(supabase);
-  const quotas = await loadQuotaViews(supabase, inv);
+  const { scope: wsScope, workspace } = await getSession();
+  const { display } = await getDisplay();
+  const inv = await loadInventory(wsScope);
+  const quotas = await loadQuotaViews(wsScope, inv);
   const monitored = inv.resources.filter((r) => r.is_monitored && r.status === "active");
 
   if (monitored.length === 0) {
@@ -140,7 +143,7 @@ export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
         {header}
         {picker}
         <Notice tone="neutral" title={`${metric.name} is not available from ${PROVIDER_NAMES[metric.provider]}`}>
-          {metric.unsupportedReason} CloudWatch shows this as unsupported instead of guessing or showing zero.
+          {metric.unsupportedReason} Limit Gauge shows this as unsupported instead of guessing or showing zero.
         </Notice>
       </>
     );
@@ -171,7 +174,7 @@ export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
 
   const from = new Date(Math.min(startOfUtcDay(now).getTime() - (range - 1) * DAY_MS, cycle.start.getTime()));
   const rows = await loadSamples(
-    supabase,
+    wsScope,
     metric.scopeLevel === "account" ? { metricKeys: [metric.key], accountIds: [scopeId], from } : { metricKeys: [metric.key], resourceIds: scopeIds, from },
   );
   const points = toPoints(rows);
@@ -355,7 +358,7 @@ export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
               {effective?.evaluation?.cost?.status === "estimated" ? (
                 <span className="block">
                   Est. overage this cycle:{" "}
-                  {formatMoney(effective.evaluation.cost.projectedOverageCost ?? effective.evaluation.cost.currentOverageCost ?? 0, effective.evaluation.cost.currency!)} (projected)
+                  {formatCost(effective.evaluation.cost.projectedOverageCost ?? effective.evaluation.cost.currentOverageCost ?? 0, effective.evaluation.cost.currency!, display)} (projected)
                 </span>
               ) : null}
             </>

@@ -8,7 +8,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       </div>
       <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-sm">{children}</div>
       <p className="mt-6 max-w-sm text-center text-xs text-faint">
-        CloudWatch monitors usage and sends early warnings. It does not cap spending or change your cloud resources.
+        Limit Gauge monitors usage and sends early warnings. It does not cap spending or change your cloud resources.
       </p>
     </main>
   );

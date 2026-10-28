@@ -1,6 +1,8 @@
 // Published prices for the cost simulator. They come from pricing pages, not APIs, so
 // every sheet records its source and the day it was checked. All amounts are USD.
 
+import type { PriceTier } from "../cost";
+
 export type Service = "supabase" | "upstash" | "vercel" | "cloudflare";
 
 export const SERVICE_LABELS: Record<Service, string> = {
@@ -30,11 +32,13 @@ export interface PriceItem {
   label: string;
   unit: string;
   includedQuantity: number;
-  /** null: going over the included quantity is a restriction on this plan, not a charge. */
+  /** null: going over the included quantity is a restriction on this plan, not a charge. With `tiers`, the first tier's price. */
   unitPrice: number | null;
   /** Price applies per this many units. */
   unitSize: number;
   billingMode: "per_unit" | "package";
+  /** Graduated tiers, ascending; the last has no bound. Replaces the single `unitPrice` rate. */
+  tiers?: PriceTier[];
   note?: string;
 }
 

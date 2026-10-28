@@ -8,7 +8,7 @@ export interface EmailMessage {
 /** Sends via SMTP (local Mailpit or any provider), the Resend API, or logs to the console. */
 export async function sendEmail(msg: EmailMessage): Promise<void> {
   const mode = process.env.EMAIL_TRANSPORT ?? "console";
-  const from = process.env.EMAIL_FROM ?? "CloudWatch <alerts@cloudwatch.local>";
+  const from = process.env.EMAIL_FROM ?? "Limit Gauge <alerts@limitgauge.local>";
 
   if (mode === "smtp") {
     const nodemailer = await import("nodemailer");

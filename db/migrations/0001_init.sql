@@ -1,19 +1,8 @@
--- CloudWatch initial schema
+-- Limit Gauge schema for Neon.
 --
--- Isolation model:
---   * Every workspace-owned row carries workspace_id and is protected by RLS using
---     public.is_workspace_member().
---   * The `authenticated` role only receives the column-level privileges the UI needs.
---     Everything else (ingestion, credentials, alert generation) runs with the service role
---     from server-only code.
---   * provider_credentials and oauth_states have RLS enabled and NO policies, and all
---     privileges are revoked from anon/authenticated, so secrets never reach the client.
-
-create extension if not exists pgcrypto with schema extensions;
-
--- ---------------------------------------------------------------------------
--- Helpers
--- ---------------------------------------------------------------------------
+-- Authorization is enforced in application code (src/db/scope.ts): every user-facing query
+-- filters by the workspace of a WorkspaceScope. User ids are text with no foreign key because
+-- users live in Neon Auth's managed neon_auth schema.
 
 create or replace function public.touch_updated_at()
 returns trigger
@@ -26,12 +15,10 @@ begin
 end;
 $$;
 
--- ---------------------------------------------------------------------------
--- Users & workspaces
--- ---------------------------------------------------------------------------
+-- Users & workspaces ---------------------------------------------------------
 
 create table public.profiles (
-  id uuid primary key references auth.users (id) on delete cascade,
+  id text primary key,
   email text not null,
   display_name text,
   created_at timestamptz not null default now(),
@@ -41,7 +28,7 @@ create table public.profiles (
 create table public.workspaces (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(name) between 1 and 80),
-  owner_id uuid not null references auth.users (id) on delete cascade,
+  owner_id text not null,
   notify_in_app boolean not null default true,
   notify_email boolean not null default true,
   email_min_severity text not null default 'warning'
@@ -56,29 +43,14 @@ create index workspaces_owner_idx on public.workspaces (owner_id);
 -- MVP: exactly one owner per workspace. The table exists so teams can be added later.
 create table public.workspace_members (
   workspace_id uuid not null references public.workspaces (id) on delete cascade,
-  user_id uuid not null references auth.users (id) on delete cascade,
+  user_id text not null,
   role text not null default 'owner' check (role in ('owner')),
   created_at timestamptz not null default now(),
   primary key (workspace_id, user_id)
 );
 create index workspace_members_user_idx on public.workspace_members (user_id);
 
-create or replace function public.is_workspace_member(ws uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select exists (
-    select 1 from public.workspace_members m
-    where m.workspace_id = ws and m.user_id = (select auth.uid())
-  );
-$$;
-
--- ---------------------------------------------------------------------------
--- Provider connections, credentials, accounts, resources
--- ---------------------------------------------------------------------------
+-- Provider connections, credentials, accounts, resources -----------------------
 
 create table public.provider_connections (
   id uuid primary key default gen_random_uuid(),
@@ -103,7 +75,7 @@ create table public.provider_connections (
   last_manual_sync_at timestamptz,
   consecutive_failures integer not null default 0,
   last_error_code text,
-  created_by uuid references auth.users (id) on delete set null,
+  created_by text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   disconnected_at timestamptz,
@@ -126,7 +98,7 @@ create table public.provider_credentials (
 create table public.oauth_states (
   state text primary key,
   workspace_id uuid not null references public.workspaces (id) on delete cascade,
-  user_id uuid not null references auth.users (id) on delete cascade,
+  user_id text not null,
   provider text not null,
   code_verifier_ciphertext text not null,
   connection_id uuid references public.provider_connections (id) on delete cascade,
@@ -186,9 +158,7 @@ create table public.provider_resources (
 create index provider_resources_workspace_idx on public.provider_resources (workspace_id);
 create index provider_resources_account_idx on public.provider_resources (account_id);
 
--- ---------------------------------------------------------------------------
--- Applications (user-defined grouping, independent of provider hierarchy)
--- ---------------------------------------------------------------------------
+-- Applications (user-defined grouping, independent of provider hierarchy) ----------
 
 create table public.applications (
   id uuid primary key default gen_random_uuid(),
@@ -216,10 +186,8 @@ create table public.application_resources (
 );
 create index application_resources_workspace_idx on public.application_resources (workspace_id);
 
--- ---------------------------------------------------------------------------
--- Reference data: metric definitions and versioned pricing rules.
+-- Reference data: metric definitions and versioned pricing rules ---------------------
 -- Source of truth lives in code (src/lib/providers/*); synced by the server.
--- ---------------------------------------------------------------------------
 
 create table public.metric_definitions (
   key text primary key,
@@ -253,9 +221,7 @@ create table public.pricing_rules (
   unique (metric_key, plan, version)
 );
 
--- ---------------------------------------------------------------------------
--- Quotas
--- ---------------------------------------------------------------------------
+-- Quotas ------------------------------------------------------------------------------
 
 create table public.quota_rules (
   id uuid primary key default gen_random_uuid(),
@@ -275,7 +241,7 @@ create table public.quota_rules (
   plan_hint text,
   notes text check (notes is null or char_length(notes) <= 500),
   verified_at timestamptz,
-  created_by uuid references auth.users (id) on delete set null,
+  created_by text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (
@@ -309,9 +275,7 @@ create table public.quota_evaluations (
 );
 create index quota_evaluations_workspace_idx on public.quota_evaluations (workspace_id);
 
--- ---------------------------------------------------------------------------
--- Usage & cost
--- ---------------------------------------------------------------------------
+-- Usage & cost ---------------------------------------------------------------------------
 
 create table public.usage_samples (
   id bigint generated always as identity primary key,
@@ -359,9 +323,7 @@ create table public.cost_records (
 );
 create index cost_records_workspace_idx on public.cost_records (workspace_id, period_start);
 
--- ---------------------------------------------------------------------------
--- Alerts & notifications
--- ---------------------------------------------------------------------------
+-- Alerts & notifications ------------------------------------------------------------------
 
 create table public.alert_rules (
   id uuid primary key default gen_random_uuid(),
@@ -411,7 +373,7 @@ create table public.alerts (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   acknowledged_at timestamptz,
-  acknowledged_by uuid references auth.users (id) on delete set null,
+  acknowledged_by text,
   muted_until timestamptz,
   resolved_at timestamptz,
   unique (workspace_id, dedupe_key)
@@ -439,9 +401,7 @@ create index notification_deliveries_pending_idx on public.notification_deliveri
   where status in ('pending', 'sending');
 create index notification_deliveries_inbox_idx on public.notification_deliveries (workspace_id, channel, created_at desc);
 
--- ---------------------------------------------------------------------------
--- Operations
--- ---------------------------------------------------------------------------
+-- Operations ------------------------------------------------------------------------------
 
 create table public.sync_runs (
   id uuid primary key default gen_random_uuid(),
@@ -460,7 +420,7 @@ create index sync_runs_connection_idx on public.sync_runs (connection_id, starte
 create table public.audit_logs (
   id bigint generated always as identity primary key,
   workspace_id uuid references public.workspaces (id) on delete cascade,
-  actor_id uuid references auth.users (id) on delete set null,
+  actor_id text,
   action text not null,
   target_type text,
   target_id text,
@@ -469,9 +429,7 @@ create table public.audit_logs (
 );
 create index audit_logs_workspace_idx on public.audit_logs (workspace_id, created_at desc);
 
--- ---------------------------------------------------------------------------
--- updated_at triggers
--- ---------------------------------------------------------------------------
+-- updated_at triggers ---------------------------------------------------------------------
 
 do $$
 declare t text;
@@ -487,50 +445,7 @@ begin
   end loop;
 end $$;
 
--- ---------------------------------------------------------------------------
--- New user bootstrap: profile, default workspace, membership, default alert rules
--- ---------------------------------------------------------------------------
-
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  ws_id uuid;
-  base_name text := coalesce(nullif(split_part(new.email, '@', 1), ''), 'My');
-begin
-  insert into public.profiles (id, email) values (new.id, coalesce(new.email, ''));
-
-  insert into public.workspaces (name, owner_id)
-  values (left(base_name || '''s workspace', 80), new.id)
-  returning id into ws_id;
-
-  insert into public.workspace_members (workspace_id, user_id, role) values (ws_id, new.id, 'owner');
-
-  insert into public.alert_rules (workspace_id, category, thresholds) values
-    (ws_id, 'quota_threshold', '[
-      {"percent": 50, "severity": "info"},
-      {"percent": 75, "severity": "warning"},
-      {"percent": 90, "severity": "critical"},
-      {"percent": 100, "severity": "limit_reached"}
-    ]'::jsonb),
-    (ws_id, 'forecast_breach', '[]'::jsonb),
-    (ws_id, 'cost_overage', '[]'::jsonb),
-    (ws_id, 'integration_health', '[]'::jsonb);
-
-  return new;
-end;
-$$;
-
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function public.handle_new_user();
-
--- ---------------------------------------------------------------------------
--- Worker functions (service role only)
--- ---------------------------------------------------------------------------
+-- Worker functions -------------------------------------------------------------------------
 
 -- Atomically claim connections that are due for collection. SKIP LOCKED lets several
 -- workers run concurrently without processing the same connection twice.
@@ -599,150 +514,3 @@ begin
   returning d.*;
 end;
 $$;
-
-revoke execute on function public.claim_due_connections(integer, integer) from public, anon, authenticated;
-revoke execute on function public.claim_connection(uuid, integer) from public, anon, authenticated;
-revoke execute on function public.claim_due_deliveries(integer) from public, anon, authenticated;
-grant execute on function public.claim_due_connections(integer, integer) to service_role;
-grant execute on function public.claim_connection(uuid, integer) to service_role;
-grant execute on function public.claim_due_deliveries(integer) to service_role;
-revoke execute on function public.handle_new_user() from public, anon, authenticated;
-
--- ---------------------------------------------------------------------------
--- Privileges: start from nothing, grant only what the UI needs
--- ---------------------------------------------------------------------------
-
-revoke all on all tables in schema public from anon, authenticated;
-revoke all on all sequences in schema public from anon, authenticated;
-
-grant select on public.profiles to authenticated;
-grant update (display_name) on public.profiles to authenticated;
-
-grant select on public.workspaces to authenticated;
-grant update (name, notify_in_app, notify_email, email_min_severity, alert_email, stale_after_hours)
-  on public.workspaces to authenticated;
-
-grant select on public.workspace_members to authenticated;
-
-grant select on public.provider_connections to authenticated;
-grant update (label) on public.provider_connections to authenticated;
-
-grant select on public.provider_accounts to authenticated;
-grant update (billing_cycle_anchor_day) on public.provider_accounts to authenticated;
-
-grant select on public.provider_resources to authenticated;
-grant update (is_monitored) on public.provider_resources to authenticated;
-
-grant select, insert, delete on public.applications to authenticated;
-grant update (name, description) on public.applications to authenticated;
-
-grant select, insert, delete on public.application_resources to authenticated;
-
-grant select on public.metric_definitions to authenticated;
-grant select on public.pricing_rules to authenticated;
-
-grant select, delete on public.quota_rules to authenticated;
-grant insert (workspace_id, metric_key, scope_type, account_id, resource_id, limit_value, unit, period,
-              source, overage_effect, pricing_rule_id, thresholds, plan_hint, notes, verified_at, created_by)
-  on public.quota_rules to authenticated;
-grant update (limit_value, overage_effect, pricing_rule_id, thresholds, notes, verified_at, plan_hint)
-  on public.quota_rules to authenticated;
-
-grant select on public.quota_evaluations to authenticated;
-grant select on public.usage_samples to authenticated;
-grant select on public.cost_records to authenticated;
-
-grant select on public.alert_rules to authenticated;
-grant update (enabled, thresholds, notify_in_app, notify_email) on public.alert_rules to authenticated;
-
-grant select on public.alerts to authenticated;
-grant update (status, acknowledged_at, acknowledged_by, muted_until) on public.alerts to authenticated;
-
-grant select on public.notification_deliveries to authenticated;
-grant update (read_at) on public.notification_deliveries to authenticated;
-
-grant select on public.sync_runs to authenticated;
-grant select on public.audit_logs to authenticated;
-
--- provider_credentials and oauth_states: no grants at all for anon/authenticated.
-
--- ---------------------------------------------------------------------------
--- Row level security
--- ---------------------------------------------------------------------------
-
-alter table public.profiles enable row level security;
-alter table public.workspaces enable row level security;
-alter table public.workspace_members enable row level security;
-alter table public.provider_connections enable row level security;
-alter table public.provider_credentials enable row level security;
-alter table public.oauth_states enable row level security;
-alter table public.provider_accounts enable row level security;
-alter table public.provider_resources enable row level security;
-alter table public.applications enable row level security;
-alter table public.application_resources enable row level security;
-alter table public.metric_definitions enable row level security;
-alter table public.pricing_rules enable row level security;
-alter table public.quota_rules enable row level security;
-alter table public.quota_evaluations enable row level security;
-alter table public.usage_samples enable row level security;
-alter table public.cost_records enable row level security;
-alter table public.alert_rules enable row level security;
-alter table public.alerts enable row level security;
-alter table public.notification_deliveries enable row level security;
-alter table public.sync_runs enable row level security;
-alter table public.audit_logs enable row level security;
-
-create policy "own profile" on public.profiles
-  for select to authenticated using (id = (select auth.uid()));
-create policy "update own profile" on public.profiles
-  for update to authenticated using (id = (select auth.uid())) with check (id = (select auth.uid()));
-
-create policy "members read workspace" on public.workspaces
-  for select to authenticated using (public.is_workspace_member(id));
-create policy "owner updates workspace" on public.workspaces
-  for update to authenticated using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
-
-create policy "members read membership" on public.workspace_members
-  for select to authenticated using (public.is_workspace_member(workspace_id));
-
-create policy "reference data readable" on public.metric_definitions
-  for select to authenticated using (true);
-create policy "reference data readable" on public.pricing_rules
-  for select to authenticated using (true);
-
--- Generic member policies for workspace-owned tables. Column grants above decide which
--- operations are actually possible for each table.
-do $$
-declare t text;
-begin
-  foreach t in array array[
-    'provider_connections', 'provider_accounts', 'provider_resources', 'applications',
-    'application_resources', 'quota_evaluations', 'usage_samples', 'cost_records',
-    'alert_rules', 'alerts', 'notification_deliveries', 'sync_runs', 'audit_logs'
-  ] loop
-    execute format(
-      'create policy "members read" on public.%I for select to authenticated using (public.is_workspace_member(workspace_id))', t);
-    execute format(
-      'create policy "members update" on public.%I for update to authenticated using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id))', t);
-  end loop;
-
-  foreach t in array array['applications', 'application_resources'] loop
-    execute format(
-      'create policy "members insert" on public.%I for insert to authenticated with check (public.is_workspace_member(workspace_id))', t);
-    execute format(
-      'create policy "members delete" on public.%I for delete to authenticated using (public.is_workspace_member(workspace_id))', t);
-  end loop;
-end $$;
-
--- Quotas: members can read all quotas but only create/modify/delete user-configured ones.
--- Provider-reported quotas are written exclusively by the collector.
-create policy "members read" on public.quota_rules
-  for select to authenticated using (public.is_workspace_member(workspace_id));
-create policy "members insert user quotas" on public.quota_rules
-  for insert to authenticated with check (public.is_workspace_member(workspace_id) and source = 'user');
-create policy "members update user quotas" on public.quota_rules
-  for update to authenticated
-  using (public.is_workspace_member(workspace_id) and source = 'user')
-  with check (public.is_workspace_member(workspace_id) and source = 'user');
-create policy "members delete user quotas" on public.quota_rules
-  for delete to authenticated using (public.is_workspace_member(workspace_id) and source = 'user');

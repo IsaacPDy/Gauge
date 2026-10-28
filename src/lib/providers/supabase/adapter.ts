@@ -129,7 +129,7 @@ const metrics: MetricDefinition[] = [
     derivation: "reported",
     supported: false,
     unsupportedReason:
-      "The function statistics endpoint has no documented response schema, so CloudWatch does not use it for quota alerts yet.",
+      "The function statistics endpoint has no documented response schema, so Limit Gauge does not use it for quota alerts yet.",
   },
 ];
 
@@ -316,7 +316,7 @@ export const supabaseAdapter: ProviderAdapter = {
     actualCost: { level: "unsupported", note: "The Management API has no billing endpoint." },
     forecastingInputs: { level: "supported", note: "Daily history is stored on every sync." },
     billingCycleMetadata: { level: "unsupported", note: "Set each organization's billing cycle day manually." },
-    accountControls: { level: "unsupported", note: "CloudWatch never changes Spend Cap or plans." },
+    accountControls: { level: "unsupported", note: "Limit Gauge never changes Spend Cap or plans." },
   },
   metrics,
   pricingRules,

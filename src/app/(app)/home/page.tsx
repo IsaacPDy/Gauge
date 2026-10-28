@@ -4,34 +4,37 @@ import { UsageTrendChart } from "@/components/charts";
 import { ConnectionStatusBadge, RiskLabel, SeverityBadge, SourceBadge, UsageBar } from "@/components/status";
 import { formatDate, TimeAgo } from "@/components/time";
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Flash, LinkButton, PageHeader, Select, StatCard, Table, Td, Th } from "@/components/ui";
+import { listAlerts, listFutureCosts } from "@/db/repos/alerts";
 import { isAtRisk, isSyncing, loadInventory, loadQuotaViews, loadSamples, riskScore, seriesFor } from "@/lib/data/views";
 import { totalsByCurrency } from "@/lib/engine/cost";
 import { connectionHealth } from "@/lib/engine/health";
 import { DAY_MS, startOfUtcDay } from "@/lib/engine/time";
 import { demoEnabled, getAdapter, getMetric, PROVIDER_NAMES } from "@/lib/providers/registry";
+import { formatCost } from "@/lib/currency";
+import { getDisplay } from "@/lib/currency-server";
 import { getSession } from "@/lib/session";
 import type { ConnectionStatus } from "@/lib/types";
-import { formatMoney, formatPercent, formatValue } from "@/lib/units";
+import { formatPercent, formatValue } from "@/lib/units";
 
 export const metadata = { title: "Home" };
 
 const STEPS = [
   { title: "Connect a provider", body: "Authorize read-only access to Supabase.", href: "/providers" },
-  { title: "Choose resources", body: "Pick the projects CloudWatch should monitor.", href: "/providers/resources" },
+  { title: "Choose resources", body: "Pick the projects Limit Gauge should monitor.", href: "/providers/resources" },
   { title: "Group into applications", body: "Organize resources by the product they serve.", href: "/applications" },
   { title: "Confirm limits", body: "Load provider limits or set your own thresholds.", href: "/usage/quotas" },
 ];
 
 export default async function HomePage({ searchParams }: PageProps<"/home">) {
   const sp = await searchParams;
-  const { supabase, workspace } = await getSession();
-  const inv = await loadInventory(supabase);
+  const { scope, workspace } = await getSession();
+  const inv = await loadInventory(scope);
   const now = new Date();
 
   if (inv.connections.length === 0) {
     return (
       <>
-        <PageHeader title="Welcome to CloudWatch" description="Know what your applications consume and get early warnings before limits or unexpected costs." />
+        <PageHeader title="Welcome to Limit Gauge" description="Know what your applications consume and get early warnings before limits or unexpected costs." />
         <Flash ok={sp.ok} error={sp.error} />
         <Card>
           <CardHeader title="Get started" description="Four steps to your first dashboard." />
@@ -52,16 +55,16 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
           </CardBody>
         </Card>
         <p className="mt-4 text-xs text-muted">
-          CloudWatch monitors and forecasts. It never shuts down services or changes plans, and its alerts are not spending caps.
+          Limit Gauge monitors and forecasts. It never shuts down services or changes plans, and its alerts are not spending caps.
         </p>
       </>
     );
   }
 
-  const quotas = await loadQuotaViews(supabase, inv);
-  const [{ data: openAlerts }, { data: costs }] = await Promise.all([
-    supabase.from("alerts").select("*").in("status", ["open", "acknowledged"]).order("created_at", { ascending: false }).limit(200),
-    supabase.from("cost_records").select("*").gt("period_end", now.toISOString()),
+  const quotas = await loadQuotaViews(scope, inv);
+  const [openAlerts, costs] = await Promise.all([
+    listAlerts(scope, { statuses: ["open", "acknowledged"], limit: 200 }),
+    listFutureCosts(scope, now.toISOString()),
   ]);
 
   const active = inv.connections.filter((c) => c.status !== "disconnected");
@@ -80,7 +83,8 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
 
   const reported = totalsByCurrency((costs ?? []).filter((c) => c.kind === "reported").map((c) => ({ amount: Number(c.amount), currency: c.currency })));
   const projected = totalsByCurrency((costs ?? []).filter((c) => c.kind === "projected").map((c) => ({ amount: Number(c.amount), currency: c.currency })));
-  const money = (t: Record<string, number>) => Object.entries(t).map(([cur, v]) => formatMoney(v, cur)).join(" + ");
+  const { display } = await getDisplay();
+  const money = (t: Record<string, number>) => Object.entries(t).map(([cur, v]) => formatCost(v, cur, display)).join(" + ");
 
   const risks = quotas.filter(isAtRisk).sort((a, b) => riskScore(b) - riskScore(a)).slice(0, 8);
 
@@ -91,7 +95,7 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
   const trendMetric = getMetric(typeof sp.trend === "string" ? sp.trend : "") ?? trendChoices.find((m) => m.aggregation === "incremental") ?? trendChoices[0];
   const trendScope = trendMetric ? monitored.filter((r) => r.provider === trendMetric.provider).map((r) => r.id) : [];
   const from = new Date(startOfUtcDay(now).getTime() - 29 * DAY_MS);
-  const trendRows = trendMetric && trendScope.length ? await loadSamples(supabase, { metricKeys: [trendMetric.key], resourceIds: trendScope, from }) : [];
+  const trendRows = trendMetric && trendScope.length ? await loadSamples(scope, { metricKeys: [trendMetric.key], resourceIds: trendScope, from }) : [];
   const today = new Date().toISOString().slice(0, 10);
   // Today's daily total is still accumulating; showing it would look like a sudden drop.
   const trend = trendMetric
@@ -173,7 +177,7 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
                         {formatValue(e.current, q.unit)} of {formatValue(q.limit, q.unit)}
                         {f?.status === "ok" && f.crossingAt ? <span className="text-warn"> · limit expected around {formatDate(f.crossingAt)} (estimate)</span> : null}
                         {f?.status === "ok" && !f.crossingAt && f.projectedPercent !== null ? ` · projected ${formatPercent(f.projectedPercent)} at cycle end` : null}
-                        {e.cost?.status === "estimated" && (e.cost.projectedOverageCost ?? 0) > 0 ? ` · est. overage ${formatMoney(e.cost.projectedOverageCost!, e.cost.currency!)}` : null}
+                        {e.cost?.status === "estimated" && (e.cost.projectedOverageCost ?? 0) > 0 ? ` · est. overage ${formatCost(e.cost.projectedOverageCost!, e.cost.currency!, display)}` : null}
                       </p>
                     </Link>
                   </li>

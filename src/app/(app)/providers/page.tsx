@@ -5,7 +5,7 @@ import { TimeAgo } from "@/components/time";
 import { Badge, Card, CardHeader, EmptyState, Flash, LinkButton, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/form-controls";
 import { isSyncing, loadInventory } from "@/lib/data/views";
-import { demoEnabled, PROVIDER_CATALOG, PROVIDER_NAMES } from "@/lib/providers/registry";
+import { demoEnabled, PROVIDER_CATALOG, PROVIDER_CATEGORIES, PROVIDER_NAMES } from "@/lib/providers/registry";
 import { getSession } from "@/lib/session";
 import { connectDemo } from "./actions";
 
@@ -13,14 +13,14 @@ export const metadata = { title: "Providers" };
 
 export default async function ProvidersPage({ searchParams }: PageProps<"/providers">) {
   const sp = await searchParams;
-  const { supabase } = await getSession();
-  const inv = await loadInventory(supabase);
+  const { scope } = await getSession();
+  const inv = await loadInventory(scope);
 
   return (
     <>
       <PageHeader
         title="Providers"
-        description="Connect cloud accounts with read-only access. CloudWatch discovers what you can see and collects usage on a schedule."
+        description="Connect cloud accounts with read-only access. Limit Gauge discovers what you can see and collects usage on a schedule."
         actions={<LinkButton href="/providers/resources">All resources</LinkButton>}
       />
       <Flash ok={sp.ok} error={sp.error} />
@@ -63,45 +63,59 @@ export default async function ProvidersPage({ searchParams }: PageProps<"/provid
       </Card>
 
       <h2 className="mb-3 text-sm font-semibold">Add a connection</h2>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {PROVIDER_CATALOG.map((p) => (
-          <Card key={p.id} className="flex flex-col p-4">
-            <div className="flex items-center justify-between">
-              <p className="font-medium">{p.name}</p>
-              {p.available ? <Badge tone="ok">Available</Badge> : <Badge>Coming soon</Badge>}
-            </div>
-            <p className="mt-1 flex-1 text-sm text-muted">{p.description}</p>
-            <div className="mt-3">
-              {p.available ? (
-                <LinkButton href={`/providers/connect/${p.id}`} variant="primary" size="sm">
-                  Connect {p.name}
-                </LinkButton>
-              ) : (
-                <span className="text-xs text-faint">Not available yet</span>
-              )}
-            </div>
-          </Card>
-        ))}
-        {demoEnabled() ? (
-          <Card className="flex flex-col border-dashed p-4">
-            <div className="flex items-center justify-between">
-              <p className="flex items-center gap-1.5 font-medium">
-                <FlaskConical className="size-4 text-demo" aria-hidden /> Demo Cloud
+      {PROVIDER_CATEGORIES.map((category) => (
+        <section key={category.id} className="mb-6" aria-labelledby={`category-${category.id}`}>
+          <h3 id={`category-${category.id}`} className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
+            {category.name}
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {PROVIDER_CATALOG.filter((p) => p.category === category.id).map((p) => (
+              <Card key={p.id} className="flex flex-col p-4">
+                <div className="flex items-center justify-between">
+                  <p className="font-medium">{p.name}</p>
+                  {p.available ? <Badge tone="ok">Available</Badge> : <Badge>Coming soon</Badge>}
+                </div>
+                <p className="mt-1 flex-1 text-sm text-muted">{p.description}</p>
+                <div className="mt-3">
+                  {p.available ? (
+                    <LinkButton href={`/providers/connect/${p.id}`} variant="primary" size="sm">
+                      Connect {p.name}
+                    </LinkButton>
+                  ) : (
+                    <span className="text-xs text-faint">Not available yet</span>
+                  )}
+                </div>
+              </Card>
+            ))}
+          </div>
+        </section>
+      ))}
+      {demoEnabled() ? (
+        <section className="mb-6" aria-labelledby="category-development">
+          <h3 id="category-development" className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
+            Development
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Card className="flex flex-col border-dashed p-4">
+              <div className="flex items-center justify-between">
+                <p className="flex items-center gap-1.5 font-medium">
+                  <FlaskConical className="size-4 text-demo" aria-hidden /> Demo Cloud
+                </p>
+                <Badge tone="demo">Development only</Badge>
+              </div>
+              <p className="mt-1 flex-1 text-sm text-muted">
+                Generated sample organizations and projects with 35 days of history, so you can explore forecasts and alerts without
+                credentials. Always labelled as demo data.
               </p>
-              <Badge tone="demo">Development only</Badge>
-            </div>
-            <p className="mt-1 flex-1 text-sm text-muted">
-              Generated sample organizations and projects with 35 days of history, so you can explore forecasts and alerts without
-              credentials. Always labelled as demo data.
-            </p>
-            <form action={connectDemo} className="mt-3">
-              <SubmitButton size="sm" variant="secondary" pendingText="Connecting…">
-                Add demo connection
-              </SubmitButton>
-            </form>
-          </Card>
-        ) : null}
-      </div>
+              <form action={connectDemo} className="mt-3">
+                <SubmitButton size="sm" variant="secondary" pendingText="Connecting…">
+                  Add demo connection
+                </SubmitButton>
+              </form>
+            </Card>
+          </div>
+        </section>
+      ) : null}
     </>
   );
 }

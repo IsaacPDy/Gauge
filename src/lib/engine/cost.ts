@@ -27,6 +27,25 @@ export function overageCost(
   return round2(billedUnits * rule.unitPrice);
 }
 
+export interface PriceTier {
+  /** Upper bound in usage units, counted from zero; null for no bound. */
+  upTo: number | null;
+  unitPrice: number;
+}
+
+/** Graduated pricing: each tier's price applies to the units inside it that are above the included quantity. */
+export function graduatedCost(usage: number, includedQuantity: number, tiers: PriceTier[], unitSize = 1): number {
+  let total = 0;
+  let lower = 0;
+  for (const tier of tiers) {
+    const upper = tier.upTo ?? Infinity;
+    const units = Math.max(0, Math.min(usage, upper) - Math.max(lower, includedQuantity));
+    total += (units / unitSize) * tier.unitPrice;
+    lower = upper;
+  }
+  return round2(total);
+}
+
 export function round2(n: number) {
   return Math.round(n * 100) / 100;
 }

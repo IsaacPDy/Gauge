@@ -16,34 +16,108 @@ export function getAdapter(id: string): ProviderAdapter | null {
   return ADAPTERS[id as ProviderId] ?? null;
 }
 
-/** Catalog shown on the Providers page, including integrations that are not built yet. */
-export const PROVIDER_CATALOG: { id: ProviderId; name: string; available: boolean; description: string }[] = [
+export const PROVIDER_CATEGORIES = [
+  { id: "database", name: "Databases & backend" },
+  { id: "hosting", name: "Hosting & compute" },
+  { id: "cloud", name: "Cloud platforms" },
+  { id: "messaging", name: "Email & SMS" },
+] as const;
+
+export type ProviderCategory = (typeof PROVIDER_CATEGORIES)[number]["id"];
+
+export interface CatalogEntry {
+  /**
+   * Planned integrations are not stored anywhere, so their ids are plain strings. An id
+   * joins ProviderId (and the connections.provider check constraint) once its adapter exists.
+   */
+  id: string;
+  name: string;
+  category: ProviderCategory;
+  available: boolean;
+  description: string;
+}
+
+/**
+ * Catalog shown on the Providers page, including integrations that are not built yet.
+ * Within a category, entries are listed in planned build order.
+ */
+export const PROVIDER_CATALOG: CatalogEntry[] = [
   {
     id: "supabase",
     name: "Supabase",
+    category: "database",
     available: true,
     description: "Organizations, projects, database & storage size, MAU estimate, API requests.",
   },
   {
-    id: "cloudflare",
-    name: "Cloudflare",
+    id: "neon",
+    name: "Neon",
+    category: "database",
     available: false,
-    description: "Workers, R2 and D1 billable usage. Planned for the next release.",
+    description: "Compute hours, storage, data written and branches per project.",
   },
   {
     id: "firebase",
-    name: "Firebase / Google Cloud",
+    name: "Firebase",
+    category: "database",
     available: false,
-    description: "Cloud Monitoring metrics and Cloud Billing budgets. Planned.",
+    description: "Firestore reads, writes and storage, Auth MAU and Cloud Functions invocations.",
   },
-  { id: "aws", name: "AWS", available: false, description: "Cost Explorer spend and budgets. Planned." },
+  {
+    id: "vercel",
+    name: "Vercel",
+    category: "hosting",
+    available: false,
+    description: "Function invocations, edge requests, data transfer, build minutes and billing charges.",
+  },
+  {
+    id: "cloudflare",
+    name: "Cloudflare",
+    category: "hosting",
+    available: false,
+    description: "Workers requests and CPU time, R2 storage and operations, D1 rows, KV operations.",
+  },
+  {
+    id: "railway",
+    name: "Railway",
+    category: "hosting",
+    available: false,
+    description: "CPU, memory, network and disk usage per project, plus the estimated bill.",
+  },
+  {
+    id: "digitalocean",
+    name: "DigitalOcean",
+    category: "hosting",
+    available: false,
+    description: "Account balance, billing history, Droplet and App Platform usage.",
+  },
+  { id: "aws", name: "AWS", category: "cloud", available: false, description: "Cost Explorer spend, budgets and Limit Gauge metrics." },
+  {
+    id: "gcp",
+    name: "Google Cloud",
+    category: "cloud",
+    available: false,
+    description: "Cloud Billing budgets and Cloud Monitoring metrics.",
+  },
+  { id: "azure", name: "Azure", category: "cloud", available: false, description: "Cost Management spend and budgets." },
+  {
+    id: "twilio",
+    name: "Twilio",
+    category: "messaging",
+    available: false,
+    description: "SMS and voice usage and spend by category.",
+  },
+  {
+    id: "sendgrid",
+    name: "SendGrid",
+    category: "messaging",
+    available: false,
+    description: "Emails sent and delivered against the plan's monthly limit.",
+  },
 ];
 
 export const PROVIDER_NAMES: Record<string, string> = {
-  supabase: "Supabase",
-  cloudflare: "Cloudflare",
-  firebase: "Firebase",
-  aws: "AWS",
+  ...Object.fromEntries(PROVIDER_CATALOG.map((p) => [p.id, p.name])),
   demo: "Demo Cloud",
 };
 

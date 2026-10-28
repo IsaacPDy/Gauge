@@ -85,6 +85,16 @@ describe("decode", () => {
     expect(notices[0]).toContain(`${"x".repeat(40)}…`);
     expect(notices[0]).not.toContain("x".repeat(41));
   });
+
+  it("reads the Firebase plan, database backend and Cloud Storage file store", () => {
+    const { inputs, notices } = decode(params("fb=blaze&db=firebase&fs=firebase"));
+    expect(inputs).toMatchObject({ firebase: "blaze", db: "firebase", fileStore: "firebase" });
+    expect(notices).toEqual([]);
+  });
+
+  it("defaults Firebase off with Supabase as the database in every preset", () => {
+    for (const p of PRESETS) expect(presetInputs(p)).toMatchObject({ firebase: "off", db: "supabase" });
+  });
 });
 
 describe("encode", () => {
@@ -106,5 +116,12 @@ describe("encode", () => {
     inputs.hitPct = 92;
     inputs.planningQps.medium = 650;
     expect(decode(params(encode(inputs))).inputs).toEqual(inputs);
+  });
+
+  it("round-trips the Firebase inputs", () => {
+    const edited = { ...presetInputs("small_saas"), firebase: "spark" as const, db: "firebase" as const, fileStore: "firebase" as const };
+    const query = encode(edited);
+    expect(query).toBe("p=small_saas&fb=spark&db=firebase&fs=firebase");
+    expect(decode(params(query)).inputs).toEqual(edited);
   });
 });

@@ -8,6 +8,7 @@ import { Badge, Card, CardBody, CardHeader, Checkbox, EmptyState, Flash, inputCl
 import { isSyncing, loadInventory } from "@/lib/data/views";
 import { connectionHealth } from "@/lib/engine/health";
 import { getAdapter, getMetric, PROVIDER_NAMES } from "@/lib/providers/registry";
+import { listSyncRuns } from "@/db/repos/inventory";
 import { oauthConfigured } from "@/lib/providers/supabase/oauth";
 import { CAPABILITY_LABELS, type Capabilities } from "@/lib/providers/types";
 import { getSession } from "@/lib/session";
@@ -20,7 +21,7 @@ export const metadata = { title: "Connection" };
 const FAILURE_HELP: Record<string, string> = {
   reauth_required: "The provider rejected the stored credentials (expired or revoked). Collection is paused until you reauthorize below.",
   permission_insufficient: "The credentials work but lack a required read permission. Reconnect with the permissions listed below.",
-  error: "Repeated failures contacting the provider. CloudWatch keeps retrying with backoff; existing data is kept and never treated as zero.",
+  error: "Repeated failures contacting the provider. Limit Gauge keeps retrying with backoff; existing data is kept and never treated as zero.",
   disconnected: "This connection is disconnected. Its credentials were deleted and no data is collected. Historical data remains visible.",
 };
 
@@ -36,8 +37,8 @@ interface MetricOutcomeEntry {
 export default async function ConnectionPage({ params, searchParams }: PageProps<"/providers/[id]">) {
   const { id } = await params;
   const sp = await searchParams;
-  const { supabase, workspace } = await getSession();
-  const inv = await loadInventory(supabase);
+  const { scope, workspace } = await getSession();
+  const inv = await loadInventory(scope);
   const conn = inv.connectionById.get(id);
   if (!conn) notFound();
 
@@ -45,7 +46,7 @@ export default async function ConnectionPage({ params, searchParams }: PageProps
   const accounts = inv.accounts.filter((a) => a.connection_id === conn.id);
   const resources = inv.resources.filter((r) => r.connection_id === conn.id);
   const monitoredCount = resources.filter((r) => r.is_monitored).length;
-  const { data: runs } = await supabase.from("sync_runs").select("*").eq("connection_id", conn.id).order("started_at", { ascending: false }).limit(10);
+  const runs = await listSyncRuns(scope, conn.id, 10);
   const syncing = isSyncing(conn);
   const setup = (sp.setup === "1" || monitoredCount === 0) && resources.length > 0 && conn.status !== "disconnected";
   const health = connectionHealth(
@@ -111,7 +112,7 @@ export default async function ConnectionPage({ params, searchParams }: PageProps
         <Card className="mb-6 border-accent/40">
           <CardHeader
             title="Choose resources to monitor"
-            description="CloudWatch only collects usage for the resources you select. You can change this at any time."
+            description="Limit Gauge only collects usage for the resources you select. You can change this at any time."
           />
           <form action={saveMonitoring}>
             <input type="hidden" name="connectionId" value={conn.id} />

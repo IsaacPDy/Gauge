@@ -9,6 +9,7 @@ import { Badge, Button, Card, CardBody, CardHeader, Checkbox, EmptyState, Flash,
 import { isSyncing, loadInventory, loadQuotaViews, loadSamples, seriesFor } from "@/lib/data/views";
 import { DAY_MS, startOfUtcDay } from "@/lib/engine/time";
 import { getAdapter, getMetric, PROVIDER_NAMES } from "@/lib/providers/registry";
+import { listAlerts } from "@/db/repos/alerts";
 import { getSession } from "@/lib/session";
 import { formatValue } from "@/lib/units";
 import { addResources, deleteApplication, removeResource, updateApplication } from "../actions";
@@ -18,12 +19,12 @@ export const metadata = { title: "Application" };
 export default async function ApplicationPage({ params, searchParams }: PageProps<"/applications/[id]">) {
   const { id } = await params;
   const sp = await searchParams;
-  const { supabase } = await getSession();
-  const inv = await loadInventory(supabase);
+  const { scope } = await getSession();
+  const inv = await loadInventory(scope);
   const app = inv.applications.find((a) => a.id === id);
   if (!app) notFound();
 
-  const quotas = await loadQuotaViews(supabase, inv);
+  const quotas = await loadQuotaViews(scope, inv);
   const resources = inv.resources.filter((r) => inv.appByResource.get(r.id)?.id === app.id);
   const ids = new Set(resources.map((r) => r.id));
   const accountIds = new Set(resources.map((r) => r.account_id).filter(Boolean) as string[]);
@@ -32,12 +33,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
   const sharedQuotas = quotas.filter((q) => q.evaluation?.isEffective && q.accountId && accountIds.has(q.accountId));
   const candidates = inv.resources.filter((r) => !ids.has(r.id) && r.status === "active");
 
-  const { data: alerts } = await supabase
-    .from("alerts")
-    .select("*")
-    .in("status", ["open", "acknowledged", "muted"])
-    .order("created_at", { ascending: false })
-    .limit(200);
+  const alerts = await listAlerts(scope, { statuses: ["open", "acknowledged", "muted"], limit: 200 });
   const appAlerts = (alerts ?? []).filter(
     (a) => a.application_id === app.id || (a.resource_id && ids.has(a.resource_id)) || (a.category === "integration_health" && connections.some((c) => c.id === a.connection_id)),
   );
@@ -52,7 +48,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
   const chartScope = metric ? monitored.filter((r) => r.provider === metric.provider).map((r) => r.id) : [];
   const now = new Date();
   const from = new Date(startOfUtcDay(now).getTime() - 29 * DAY_MS);
-  const rows = metric && chartScope.length ? await loadSamples(supabase, { metricKeys: [metric.key], resourceIds: chartScope, from }) : [];
+  const rows = metric && chartScope.length ? await loadSamples(scope, { metricKeys: [metric.key], resourceIds: chartScope, from }) : [];
   const today = now.toISOString().slice(0, 10);
   // Today's total for incremental metrics is still accumulating; leave it out of the history chart.
   const daily = metric ? seriesFor(metric, rows, chartScope, from, now).filter((d) => metric.aggregation !== "incremental" || d.day !== today) : [];
@@ -169,7 +165,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
           <CardHeader title="Shared organization quotas" description="Billed at organization level and shared with other projects." />
           <CardBody className="space-y-3">
             <Notice tone="neutral">
-              These allowances cover every project in the organization. CloudWatch does not attribute shared usage or charges to this
+              These allowances cover every project in the organization. Limit Gauge does not attribute shared usage or charges to this
               application.
             </Notice>
             {sharedQuotas.length === 0 ? <p className="text-sm text-muted">None configured.</p> : null}
