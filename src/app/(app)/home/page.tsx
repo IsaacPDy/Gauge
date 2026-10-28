@@ -9,9 +9,11 @@ import { totalsByCurrency } from "@/lib/engine/cost";
 import { connectionHealth } from "@/lib/engine/health";
 import { DAY_MS, startOfUtcDay } from "@/lib/engine/time";
 import { demoEnabled, getAdapter, getMetric, PROVIDER_NAMES } from "@/lib/providers/registry";
+import { formatCost } from "@/lib/currency";
+import { getDisplay } from "@/lib/currency-server";
 import { getSession } from "@/lib/session";
 import type { ConnectionStatus } from "@/lib/types";
-import { formatMoney, formatPercent, formatValue } from "@/lib/units";
+import { formatPercent, formatValue } from "@/lib/units";
 
 export const metadata = { title: "Home" };
 
@@ -80,7 +82,8 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
 
   const reported = totalsByCurrency((costs ?? []).filter((c) => c.kind === "reported").map((c) => ({ amount: Number(c.amount), currency: c.currency })));
   const projected = totalsByCurrency((costs ?? []).filter((c) => c.kind === "projected").map((c) => ({ amount: Number(c.amount), currency: c.currency })));
-  const money = (t: Record<string, number>) => Object.entries(t).map(([cur, v]) => formatMoney(v, cur)).join(" + ");
+  const { display } = await getDisplay();
+  const money = (t: Record<string, number>) => Object.entries(t).map(([cur, v]) => formatCost(v, cur, display)).join(" + ");
 
   const risks = quotas.filter(isAtRisk).sort((a, b) => riskScore(b) - riskScore(a)).slice(0, 8);
 
@@ -173,7 +176,7 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
                         {formatValue(e.current, q.unit)} of {formatValue(q.limit, q.unit)}
                         {f?.status === "ok" && f.crossingAt ? <span className="text-warn"> · limit expected around {formatDate(f.crossingAt)} (estimate)</span> : null}
                         {f?.status === "ok" && !f.crossingAt && f.projectedPercent !== null ? ` · projected ${formatPercent(f.projectedPercent)} at cycle end` : null}
-                        {e.cost?.status === "estimated" && (e.cost.projectedOverageCost ?? 0) > 0 ? ` · est. overage ${formatMoney(e.cost.projectedOverageCost!, e.cost.currency!)}` : null}
+                        {e.cost?.status === "estimated" && (e.cost.projectedOverageCost ?? 0) > 0 ? ` · est. overage ${formatCost(e.cost.projectedOverageCost!, e.cost.currency!, display)}` : null}
                       </p>
                     </Link>
                   </li>

@@ -3,16 +3,16 @@ import { DAY_MS } from "../time";
 import { CATALOG, type Catalog, type Service, sheetFor } from "./catalog";
 import type { SimInputs } from "./inputs";
 import { enabledPlans, priceMonth } from "./price";
-import { cacheVerdict, chooseCompute, collectEvents, type MonthResult, type SimulationResult } from "./project";
+import { cacheVerdict, chooseCompute, collectEvents, type MoneyFormat, type MonthResult, type SimulationResult } from "./project";
 import { resolveStack } from "./stack";
 import { workloadMonths } from "./workload";
 
-export type { CacheVerdict, EventKind, MonthResult, Provenance, SimEvent, SimulationResult, VerdictKind } from "./project";
+export type { CacheVerdict, EventKind, MoneyFormat, MonthResult, Provenance, SimEvent, SimulationResult, VerdictKind } from "./project";
 export type { LineItem } from "./price";
 
 const STALE_AFTER_DAYS = 90;
 
-export function simulate(inputs: SimInputs, opts: { catalog?: Catalog; now?: Date; months?: number } = {}): SimulationResult {
+export function simulate(inputs: SimInputs, opts: { catalog?: Catalog; now?: Date; months?: number; money?: MoneyFormat } = {}): SimulationResult {
   const catalog = opts.catalog ?? CATALOG;
   const now = opts.now ?? new Date();
   const horizon = opts.months ?? 12;
@@ -35,7 +35,7 @@ export function simulate(inputs: SimInputs, opts: { catalog?: Catalog; now?: Dat
     };
   });
 
-  const verdict = cacheVerdict(inputs, stack, catalog, horizon);
+  const verdict = cacheVerdict(inputs, stack, catalog, horizon, opts.money);
   const provenance = enabledPlans(stack).flatMap(({ service, plan }) => {
     const sheet = sheetFor(catalog, service, plan);
     if (!sheet) return [];
@@ -45,5 +45,5 @@ export function simulate(inputs: SimInputs, opts: { catalog?: Catalog; now?: Dat
     return [{ service, plan, label: sheet.label, version: sheet.version, verifiedAt: sheet.verifiedAt, sourceUrl: sheet.sourceUrl, stale: !(ageDays <= STALE_AFTER_DAYS) }];
   });
 
-  return { months, verdict, events: collectEvents(months, verdict, stack, inputs, catalog), notices, provenance };
+  return { months, verdict, events: collectEvents(months, verdict, stack, inputs, catalog, opts.money), notices, provenance };
 }

@@ -2,13 +2,14 @@
 
 import { Calculator, ExternalLink } from "lucide-react";
 import { CostProjectionChart } from "@/components/charts";
+import { useCurrency } from "@/components/currency";
 import { Badge, Card, CardBody, CardHeader, EmptyState, Notice, Select, StatCard, Table, Td, Th, type Tone } from "@/components/ui";
 import type { SimulationResult, VerdictKind } from "@/lib/engine/simulate";
 import { CATALOG, SERVICE_LABELS } from "@/lib/engine/simulate/catalog";
 import { formatAmount, formatPerUser, formatQps } from "@/lib/engine/simulate/format";
-import { formatCount, formatMoney } from "@/lib/units";
+import { convertUsd, formatUsdAs } from "@/lib/currency";
+import { formatCount } from "@/lib/units";
 
-const usd = (n: number) => formatMoney(n, "USD");
 const FIXED_KEYS = new Set(["base", "compute", "credit"]);
 const VERDICT: Record<VerdictKind, { title: string; tone: Tone }> = {
   add_cache: { title: "Add a cache", tone: "accent" },
@@ -19,6 +20,8 @@ const VERDICT: Record<VerdictKind, { title: string; tone: Tone }> = {
 };
 
 export function SimulatorResults({ result, month, onMonth }: { result: SimulationResult; month: number; onMonth: (m: number) => void }) {
+  const display = useCurrency();
+  const usd = (n: number) => formatUsdAs(n, display);
   const services = result.provenance.map((p) => p.service);
   if (services.length === 0) {
     return (
@@ -37,7 +40,7 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
   const chartData = result.months.map((m) => ({
     month: m.restricted ? `M${m.month} ⚠` : `M${m.month}`,
     restricted: m.restricted,
-    ...Object.fromEntries(services.map((s) => [s, m.totalsByService[s] ?? 0])),
+    ...Object.fromEntries(services.map((s) => [s, convertUsd(m.totalsByService[s] ?? 0, display)])),
     ...Object.fromEntries(services.map((s) => [`restricted_${s}`, m.items.some((i) => i.service === s && i.restricted)])),
   }));
   const verdict = VERDICT[result.verdict.kind];
@@ -48,7 +51,7 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <StatCard label="Month 1" value={usd(first.total)} hint="per month, estimated" />
         <StatCard label="Month 12" value={usd(last.total)} hint={`${formatCount(last.usage.mau)} MAU`} />
-        <StatCard label="Cost per MAU" value={first.usage.mau > 0 ? formatPerUser(first.total / first.usage.mau) : "—"} hint="month 1" />
+        <StatCard label="Cost per MAU" value={first.usage.mau > 0 ? formatPerUser(first.total / first.usage.mau, display) : "—"} hint="month 1" />
         <StatCard
           label="Peak DB load"
           value={first.computeSize ? `${formatQps(first.usage.peakDbQps)} q/s` : "—"}
@@ -70,7 +73,7 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
       <Card>
         <CardHeader title="12-month projection" description="Monthly cost by service. Growth compounds each month." />
         <CardBody>
-          <CostProjectionChart data={chartData} keys={services} labels={labels} />
+          <CostProjectionChart data={chartData} keys={services} labels={labels} currency={display.currency} />
           {anyRestricted ? (
             <p className="mt-2 text-xs text-muted">Months marked ⚠ go over a free plan limit, so a paid plan would be needed. Hatched bars show which service.</p>
           ) : null}

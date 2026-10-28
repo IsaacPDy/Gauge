@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { formatUsdAs } from "@/lib/currency";
 import { simulate } from "@/lib/engine/simulate";
 import { PRESETS, presetInputs, type SimInputs } from "@/lib/engine/simulate/inputs";
 import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
@@ -102,6 +103,14 @@ describe("events", () => {
   it("prices a compute upgrade", () => {
     const e = run(atQps(60, { growthPct: 10 })).events.find((x) => x.kind === "compute_upgrade")!;
     expect(e.message).toBe("Database load needs Small compute (peak 73 queries/sec), $5.00 a month more than Micro.");
+  });
+
+  it("writes amounts in messages with the money formatter it is given", () => {
+    const peso = (n: number) => formatUsdAs(n, { currency: "PHP", rate: 60 });
+    const r = simulate(atQps(60, { growthPct: 10 }), { catalog: TEST_CATALOG, now: NOW, money: peso });
+    expect(r.events.find((x) => x.kind === "compute_upgrade")!.message).toContain(`${peso(5)} a month more`);
+    const v = simulate(atQps(120), { catalog: FREE_CACHE_CATALOG, now: NOW, money: peso }).verdict;
+    expect(v.message).toBe(`A cache saves about ${peso(5)} a month: it keeps you on Micro instead of Small compute.`);
   });
 
   it("leaves a month-1 cache payoff to the verdict card", () => {

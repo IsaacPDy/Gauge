@@ -21,9 +21,11 @@ import { isStale } from "@/lib/engine/health";
 import { billingCycle, DAY_MS, dayKey, startOfUtcDay } from "@/lib/engine/time";
 import { currentUsage } from "@/lib/engine/usage";
 import { getAdapter, getMetric, PROVIDER_NAMES } from "@/lib/providers/registry";
+import { formatCost } from "@/lib/currency";
+import { getDisplay } from "@/lib/currency-server";
 import { getSession } from "@/lib/session";
 import type { MetricDefinition } from "@/lib/types";
-import { formatMoney, formatPercent, formatValue } from "@/lib/units";
+import { formatPercent, formatValue } from "@/lib/units";
 import { applyPlanAllowance, deleteQuota } from "./actions";
 import { QuotaForm } from "./quota-form";
 
@@ -51,6 +53,7 @@ function scopeOptions(inv: Inventory, metric: MetricDefinition) {
 export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
   const sp = await searchParams;
   const { supabase, workspace } = await getSession();
+  const { display } = await getDisplay();
   const inv = await loadInventory(supabase);
   const quotas = await loadQuotaViews(supabase, inv);
   const monitored = inv.resources.filter((r) => r.is_monitored && r.status === "active");
@@ -355,7 +358,7 @@ export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
               {effective?.evaluation?.cost?.status === "estimated" ? (
                 <span className="block">
                   Est. overage this cycle:{" "}
-                  {formatMoney(effective.evaluation.cost.projectedOverageCost ?? effective.evaluation.cost.currentOverageCost ?? 0, effective.evaluation.cost.currency!)} (projected)
+                  {formatCost(effective.evaluation.cost.projectedOverageCost ?? effective.evaluation.cost.currentOverageCost ?? 0, effective.evaluation.cost.currency!, display)} (projected)
                 </span>
               ) : null}
             </>

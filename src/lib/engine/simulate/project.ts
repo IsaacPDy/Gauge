@@ -55,12 +55,14 @@ function egressCost(items: LineItem[]): number {
   return items.filter((i) => i.service === "supabase" && i.key === "egress_gb").reduce((s, i) => s + i.cost, 0);
 }
 
-const usd = (n: number) => formatMoney(n, "USD");
+/** How amounts (in USD) appear in messages; callers pass one to show another currency. */
+export type MoneyFormat = (usd: number) => string;
+const usd: MoneyFormat = (n) => formatMoney(n, "USD");
 
 type MonthVerdict = Omit<CacheVerdict, "paysOffMonth">;
 
 /** Compares "bigger compute, no cache" with "cache in front of the database" for each month. */
-export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: Catalog, months: number): CacheVerdict {
+export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: Catalog, months: number, money: MoneyFormat = usd): CacheVerdict {
   const na = stack.supabase === null ? NO_SUPABASE_REASON : stack.host === "direct" ? DIRECT_REASON : null;
   if (na) {
     return { kind: "not_applicable", message: na, monthlySaving: null, tierWithoutCache: null, tierWithCache: null, cacheFixesIt: null, paysOffMonth: null };
@@ -95,7 +97,7 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
     if (tierWith !== null && costWith < costNo) {
       const saving = round2(costNo - costWith);
       if (tierWith.key === tierNo.key) {
-        return { ...base, kind: "add_cache", monthlySaving: saving, message: `A cache saves about ${usd(saving)} a month through lower egress, net of its own cost.` };
+        return { ...base, kind: "add_cache", monthlySaving: saving, message: `A cache saves about ${money(saving)} a month through lower egress, net of its own cost.` };
       }
       const computeSaved = computeSize(catalog, tierNo.key).monthlyPrice - computeSize(catalog, tierWith.key).monthlyPrice;
       const egressSaved = egressCost(itemsNo) - egressCost(itemsWith);
@@ -104,7 +106,7 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
         ...base,
         kind: "add_cache",
         monthlySaving: saving,
-        message: `A cache saves about ${usd(saving)} a month: it keeps you on ${tierWith.label} instead of ${tierNo.label} compute${tail}`,
+        message: `A cache saves about ${money(saving)} a month: it keeps you on ${tierWith.label} instead of ${tierNo.label} compute${tail}`,
       };
     }
     // Upstash's fixed-price plans aren't modelled, so say so when pay-as-you-go commands are why the cache loses to more compute.
@@ -124,7 +126,7 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
     }
     const message =
       tierWith && tierWith.key !== tierNo.key
-        ? `Without a cache you need ${tierNo.label} compute for ${qps} queries/sec. A cache serving ${hit}% of reads would let you use ${tierWith.label}, but it costs about ${usd(round2(costWith - costNo))} a month more.`
+        ? `Without a cache you need ${tierNo.label} compute for ${qps} queries/sec. A cache serving ${hit}% of reads would let you use ${tierWith.label}, but it costs about ${money(round2(costWith - costNo))} a month more.`
         : `Without a cache you need ${tierNo.label} compute for ${qps} queries/sec, and a cache serving ${hit}% of reads wouldn't let you use a smaller size.`;
     return { ...base, kind: "upgrade_compute", message: `${message}${paygNote}` };
   };
@@ -174,7 +176,14 @@ export interface SimulationResult {
   provenance: Provenance[];
 }
 
-export function collectEvents(months: MonthResult[], verdict: CacheVerdict, stack: ResolvedStack, inputs: SimInputs, catalog: Catalog): SimEvent[] {
+export function collectEvents(
+  months: MonthResult[],
+  verdict: CacheVerdict,
+  stack: ResolvedStack,
+  inputs: SimInputs,
+  catalog: Catalog,
+  money: MoneyFormat = usd,
+): SimEvent[] {
   const events: SimEvent[] = [];
   const seen = new Set<string>();
   const once = (e: SimEvent) => {
@@ -239,7 +248,7 @@ export function collectEvents(months: MonthResult[], verdict: CacheVerdict, stac
         month: m.month,
         kind: "compute_upgrade",
         service: "supabase",
-        message: `Database load needs ${sizeLabel(m.computeSize)} compute (peak ${formatQps(m.usage.peakDbQps)} queries/sec), ${usd(delta)} a month more than ${sizeLabel(prev.computeSize)}.`,
+        message: `Database load needs ${sizeLabel(m.computeSize)} compute (peak ${formatQps(m.usage.peakDbQps)} queries/sec), ${money(delta)} a month more than ${sizeLabel(prev.computeSize)}.`,
       });
     }
   });
@@ -255,7 +264,7 @@ export function collectEvents(months: MonthResult[], verdict: CacheVerdict, stac
         month: m.month,
         kind: "credit_used_up",
         service: c.service,
-        message: `Usage now exceeds the ${usd(c.amount)} monthly credit, so the bill rises above the plan fee.`,
+        message: `Usage now exceeds the ${money(c.amount)} monthly credit, so the bill rises above the plan fee.`,
       });
     }
   }

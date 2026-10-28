@@ -15,6 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { currencySymbol, type DisplayCurrency } from "@/lib/currency";
 import { formatCount, formatMoney, formatValue, niceTicks } from "@/lib/units";
 
 export interface TrendPoint {
@@ -191,20 +192,22 @@ export function BreakdownChart({
 
 /**
  * Monthly cost stacked by service. A service's bar is hatched in months where it goes over
- * a plan limit (`restricted_<key>` on the row).
+ * a plan limit (`restricted_<key>` on the row). Values are already in `currency`.
  */
 export function CostProjectionChart({
   data,
   keys,
   labels,
+  currency = "USD",
   height = 260,
 }: {
   data: Record<string, number | string | boolean>[];
   keys: string[];
   labels: Record<string, string>;
+  currency?: DisplayCurrency;
   height?: number;
 }) {
-  const money = (v: number) => formatMoney(v, "USD");
+  const money = (v: number) => formatMoney(v, currency);
   const series = keys.slice(0, 4);
   // Pattern ids are document-global, so scope them to this chart instance.
   const uid = useId().replace(/:/g, "");
@@ -222,7 +225,7 @@ export function CostProjectionChart({
           </defs>
           <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
           <XAxis dataKey="month" tick={axisTick} tickLine={false} axisLine={{ stroke: "var(--border)" }} />
-          <YAxis tickFormatter={(v: number) => `$${formatCount(v)}`} tick={axisTick} tickLine={false} axisLine={false} width={64} />
+          <YAxis tickFormatter={(v: number) => `${currencySymbol(currency)}${formatCount(v)}`} tick={axisTick} tickLine={false} axisLine={false} width={64} />
           <Tooltip
             cursor={{ fill: "var(--surface-2)" }}
             content={({ active, payload, label }) => {
