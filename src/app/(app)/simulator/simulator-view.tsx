@@ -67,7 +67,8 @@ export function SimulatorView({ initialNotices, now }: { initialNotices: string[
 
   const choosePreset = (preset: PresetKey) => {
     if (preset === inputs.preset && !edited) return;
-    if (edited && !window.confirm("Switch preset? Your changes to the current one will be lost.")) return;
+    const prompt = preset === inputs.preset ? "Reset to the preset? Your changes will be lost." : "Switch preset? Your changes to the current one will be lost.";
+    if (edited && !window.confirm(prompt)) return;
     change(presetInputs(preset));
   };
 

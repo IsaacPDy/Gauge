@@ -42,6 +42,14 @@ describe("resolveStack", () => {
     expect(noDb.cacheBlockedReason).toMatch(/Supabase/);
   });
 
+  it("says when the cache is dropped because Supabase is off, but not for a direct host", () => {
+    const noDb = resolveStack(inputsWith({ cache: "upstash_payg", supabase: "off" }));
+    expect(noDb.notices).toEqual(["The cache is modelled in front of a Supabase database, so it isn't priced while Supabase is off."]);
+
+    const direct = resolveStack(inputsWith({ cache: "upstash_payg", host: "direct" }));
+    expect(direct.notices).toEqual([]);
+  });
+
   it("moves a direct host to Vercel when Supabase is off", () => {
     const { stack, notices } = resolveStack(inputsWith({ supabase: "off", host: "direct" }));
     expect(stack.host).toBe("vercel");

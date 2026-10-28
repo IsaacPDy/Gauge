@@ -66,6 +66,7 @@ export function resolveStack(inputs: SimInputs): { stack: ResolvedStack; notices
   if (cache && supabase === null) {
     cache = false;
     cacheBlockedReason = NO_SUPABASE_REASON;
+    notices.push("The cache is modelled in front of a Supabase database, so it isn't priced while Supabase is off.");
   } else if (cache && host === "direct") {
     cache = false;
     cacheBlockedReason = DIRECT_REASON;

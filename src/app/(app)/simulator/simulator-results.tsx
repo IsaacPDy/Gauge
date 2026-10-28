@@ -60,7 +60,8 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
       {first.computeSize !== null ? (
         <Notice tone={verdict.tone} title={verdict.title}>
           <p>{result.verdict.message}</p>
-          {result.verdict.kind !== "add_cache" && result.verdict.paysOffMonth ? (
+          {/* Month 1 is the verdict itself, so only a later payoff is worth saying. */}
+          {result.verdict.kind !== "add_cache" && result.verdict.paysOffMonth !== null && result.verdict.paysOffMonth > 1 ? (
             <p className="mt-1">A cache starts paying off in month {result.verdict.paysOffMonth}.</p>
           ) : null}
         </Notice>

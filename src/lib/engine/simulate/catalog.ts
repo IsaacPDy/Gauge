@@ -3,8 +3,6 @@
 
 export type Service = "supabase" | "upstash" | "vercel" | "cloudflare";
 
-export const SERVICES: Service[] = ["supabase", "upstash", "vercel", "cloudflare"];
-
 export const SERVICE_LABELS: Record<Service, string> = {
   supabase: "Supabase",
   upstash: "Upstash Redis",

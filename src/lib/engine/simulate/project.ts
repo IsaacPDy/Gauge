@@ -89,7 +89,8 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
           ? `The Free plan's ${sizes[0].label} compute can't handle ${qps} queries/sec at ${hr}% headroom.`
           : `No compute size handles ${qps} queries/sec at ${hr}% headroom.`;
       const fix = tierWith ? ` With a cache, ${tierWith.label} compute is enough.` : ` A cache serving ${hit}% of reads doesn't fix this either.`;
-      return { ...base, kind: "no_tier_fits", cacheFixesIt: tierWith !== null, message: `${problem}${fix}` };
+      const upsell = stack.supabase === "free" ? " Supabase Pro unlocks larger compute sizes." : "";
+      return { ...base, kind: "no_tier_fits", cacheFixesIt: tierWith !== null, message: `${problem}${fix}${upsell}` };
     }
     if (tierWith !== null && costWith < costNo) {
       const saving = round2(costNo - costWith);
@@ -106,14 +107,26 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
         message: `A cache saves about ${usd(saving)} a month: it keeps you on ${tierWith.label} instead of ${tierNo.label} compute${tail}`,
       };
     }
+    // Upstash's fixed-price plans aren't modelled, so say so when pay-as-you-go commands decide against the cache.
+    const upstashItems = itemsWith.filter((it) => it.service === "upstash");
+    const upstashTotal = upstashItems.reduce((s, it) => s + it.cost, 0);
+    const commandsCost = upstashItems.filter((it) => it.key === "commands").reduce((s, it) => s + it.cost, 0);
+    const paygNote =
+      upstashItems.some((it) => it.key === "commands") && commandsCost > upstashTotal / 2
+        ? " Most of the cache cost is pay-as-you-go commands; Upstash's fixed-price plans aren't modelled yet and may be cheaper."
+        : "";
     if (tierNo.key === sizes[0].key) {
-      return { ...base, kind: "no_cache_needed", message: `${tierNo.label} compute handles your peak of ${qps} queries/sec, so a cache would only add cost.` };
+      return {
+        ...base,
+        kind: "no_cache_needed",
+        message: `${tierNo.label} compute handles your peak of ${qps} queries/sec, so a cache would only add cost.${paygNote}`,
+      };
     }
     const message =
       tierWith && tierWith.key !== tierNo.key
         ? `Without a cache you need ${tierNo.label} compute for ${qps} queries/sec. A cache serving ${hit}% of reads would let you use ${tierWith.label}, but it costs about ${usd(round2(costWith - costNo))} a month more.`
         : `Without a cache you need ${tierNo.label} compute for ${qps} queries/sec, and a cache serving ${hit}% of reads wouldn't let you use a smaller size.`;
-    return { ...base, kind: "upgrade_compute", message };
+    return { ...base, kind: "upgrade_compute", message: `${message}${paygNote}` };
   };
 
   const verdicts = noCache.map((_, i) => at(i));

@@ -147,7 +147,7 @@ export const QPS_MAX = 10_000_000;
 export const PRESET_INFO: Record<PresetKey, { label: string; description: string }> = {
   side_project: { label: "Side project", description: "A few hundred users on free tiers, growing slowly." },
   small_saas: { label: "Small SaaS", description: "Ten thousand users on paid plans, with uploads and some Realtime." },
-  consumer_app: { label: "Consumer app", description: "A quarter of a million users with spiky traffic and a cache." },
+  consumer_app: { label: "Consumer app", description: "A quarter of a million users with spiky traffic and a pay-as-you-go cache in front of the database." },
 };
 
 const ASSUMPTIONS = { headroomPct: 70, queryMs: 5, cacheValueKB: 2, cachedKeysPct: 10, avgFileMB: 0.5 };

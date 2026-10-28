@@ -6,6 +6,7 @@ import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
 import type { SimInputs } from "@/lib/engine/simulate/inputs";
 
 const MONTH = 2_592_000;
+const PAYG_NOTE = " Most of the cache cost is pay-as-you-go commands; Upstash's fixed-price plans aren't modelled yet and may be cheaper.";
 // No file downloads, so Supabase egress stays inside Pro's allowance and only compute decides the verdict (unless a test says otherwise).
 const atQps = (qps: number, extra: Partial<SimInputs> = {}) => inputsWith({ dbQueriesOverride: qps * MONTH, peakToAvg: 1, growthPct: 0, fileDownloadMBPerUser: 0, ...extra });
 
@@ -85,8 +86,10 @@ describe("cacheVerdict", () => {
   });
 
   it("explains each verdict in plain words", () => {
-    expect(verdict(atQps(50)).message).toBe("Micro compute handles your peak of 50 queries/sec, so a cache would only add cost.");
-    expect(verdict(atQps(120)).message).toMatch(/^Without a cache you need Small compute for 120 queries\/sec\. A cache serving 80% of reads would let you use Micro, but it costs about \$[\d,.]+ a month more\.$/);
+    expect(verdict(atQps(50)).message).toBe(`Micro compute handles your peak of 50 queries/sec, so a cache would only add cost.${PAYG_NOTE}`);
+    expect(verdict(atQps(120)).message).toMatch(
+      /^Without a cache you need Small compute for 120 queries\/sec\. A cache serving 80% of reads would let you use Micro, but it costs about \$[\d,.]+ a month more\. Most of the cache cost/,
+    );
     expect(verdict(atQps(120), FREE_CACHE_CATALOG).message).toBe("A cache saves about $5.00 a month: it keeps you on Micro instead of Small compute.");
     expect(verdict(inputsWith({ responseKB: 100, fileDownloadMBPerUser: 0 }), FREE_CACHE_CATALOG).message).toBe(
       "A cache saves about $31.50 a month through lower egress, net of its own cost.",
@@ -103,7 +106,16 @@ describe("cacheVerdict", () => {
   it("names the Free plan's single compute size", () => {
     const v = verdict(atQps(100, { supabase: "free" }));
     expect(v.kind).toBe("no_tier_fits");
-    expect(v.message).toBe("The Free plan's Nano compute can't handle 100 queries/sec at 70% headroom. A cache serving 80% of reads doesn't fix this either.");
+    expect(v.message).toBe(
+      "The Free plan's Nano compute can't handle 100 queries/sec at 70% headroom. A cache serving 80% of reads doesn't fix this either. Supabase Pro unlocks larger compute sizes.",
+    );
+  });
+
+  it("says when pay-as-you-go commands make most of the cache cost", () => {
+    expect(verdict(atQps(120)).message.endsWith(PAYG_NOTE)).toBe(true);
+    const egressOnly = verdict(inputsWith({ responseKB: 100, fileDownloadMBPerUser: 0 }), FREE_CACHE_CATALOG);
+    expect(egressOnly.kind).toBe("add_cache");
+    expect(egressOnly.message).not.toContain("pay-as-you-go");
   });
 
   it("counts a cache that keeps an overloaded database running as paying off", () => {

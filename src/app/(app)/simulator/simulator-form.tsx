@@ -171,7 +171,8 @@ export function SimulatorForm({
   onPreset: (preset: PresetKey) => void;
 }) {
   const seats = NUMBER_FIELDS.find((f) => f.name === "seats")!;
-  const paidSizes = CATALOG.compute.filter((c) => c.key !== CATALOG.freeCompute);
+  // Only the sizes the current plan can use: Free runs on its single size, everything else on the paid ones.
+  const planSizes = CATALOG.compute.filter((c) => (inputs.supabase === "free" ? c.key === CATALOG.freeCompute : c.key !== CATALOG.freeCompute));
   return (
     <div className="flex flex-col gap-4">
       <Card>
@@ -237,7 +238,7 @@ export function SimulatorForm({
             <p className="col-span-2 mt-2 mb-3 text-xs text-muted">
               Planning capacity per compute size, in queries/sec. Supabase doesn&apos;t publish these figures; they&apos;re rules of thumb you can tune to your own queries.
             </p>
-            {paidSizes.map((size) => (
+            {planSizes.map((size) => (
               <NumberInput
                 key={size.key}
                 id={`sim-qps-${size.key}`}
