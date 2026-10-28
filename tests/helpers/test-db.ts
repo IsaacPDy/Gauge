@@ -1,0 +1,21 @@
+import { existsSync } from "node:fs";
+
+if (existsSync(".env.local")) process.loadEnvFile(".env.local");
+
+export const testUrl = process.env.DATABASE_URL_TEST;
+export const hasTestDb = Boolean(testUrl);
+
+/**
+ * Points the app's `db` at DATABASE_URL_TEST and applies migrations to it.
+ * Call (and await) before importing anything from "@/db/*" in a test file.
+ *
+ * DATABASE_URL_TEST may be the same Neon branch as DATABASE_URL (the project owner chose to
+ * test on `dev`). That is safe only because the tests create users with random ids and delete
+ * exactly those in `afterAll`; a test must never drop, truncate or bulk-delete anything.
+ */
+export async function useTestDb() {
+  const url = testUrl!;
+  process.env.DATABASE_URL = url;
+  const { migrate } = await import("@/db/migrate");
+  await migrate(url);
+}
