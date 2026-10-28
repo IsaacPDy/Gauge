@@ -16,7 +16,10 @@ export interface CostEstimate {
 }
 
 /** Cost of `usage` above the rule's included allowance. Never negative. */
-export function overageCost(usage: number, rule: PricingRule): number {
+export function overageCost(
+  usage: number,
+  rule: Pick<PricingRule, "includedQuantity" | "unitSize" | "unitPrice" | "billingMode">,
+): number {
   const excess = Math.max(0, usage - rule.includedQuantity);
   if (excess === 0) return 0;
   const units = excess / rule.unitSize;
@@ -24,7 +27,7 @@ export function overageCost(usage: number, rule: PricingRule): number {
   return round2(billedUnits * rule.unitPrice);
 }
 
-function round2(n: number) {
+export function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 

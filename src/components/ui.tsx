@@ -29,7 +29,7 @@ export function CardHeader({ title, description, actions }: { title: ReactNode; 
         <h2 className="text-sm font-semibold text-text">{title}</h2>
         {description ? <p className="mt-0.5 text-xs text-muted">{description}</p> : null}
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }
@@ -103,13 +103,18 @@ export function Label({ htmlFor, children, hint }: { htmlFor?: string; children:
   return (
     <label htmlFor={htmlFor} className="mb-1 block text-xs font-medium text-muted">
       {children}
-      {hint ? <span className="ml-1 font-normal text-faint">{hint}</span> : null}
+      {hint ? (
+        <>
+          {" "}
+          <span className="font-normal text-faint">{hint}</span>
+        </>
+      ) : null}
     </label>
   );
 }
 
 export const inputClass =
-  "h-9 w-full rounded-md border border-border-strong bg-surface px-2.5 text-sm text-text placeholder:text-faint focus:border-accent focus:outline-none";
+  "h-9 w-full rounded-md border border-border-strong bg-surface px-2.5 text-sm text-text placeholder:text-faint focus:border-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-60";
 
 export function Input(props: ComponentProps<"input">) {
   return <input {...props} className={clsx(inputClass, props.className)} />;

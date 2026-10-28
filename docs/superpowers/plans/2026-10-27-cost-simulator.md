@@ -6,7 +6,7 @@
 
 **Architecture:** A pure, deterministic engine in `src/lib/engine/simulate/` turns inputs into resolved stack → monthly usage → priced line items → projection, verdict and events. The page is a thin server component that decodes URL params, then hands off to a client component that re-runs the engine on every change and mirrors the inputs into the URL. There is no database or server work.
 
-**Tech Stack:** Next.js 16 (app router), React 19, TypeScript, Tailwind 4, Recharts 3, zod 4, Vitest 5, lucide-react.
+**Tech Stack:** Next.js 16 (app router), React 19, TypeScript, Tailwind 4, Recharts 3, Vitest 5, lucide-react.
 
 **Spec:** `docs/superpowers/specs/2026-10-27-cost-simulator-design.md`
 
@@ -16,6 +16,8 @@
 - **The URL is synced with `window.history.replaceState`**, not `router.replace`. Next.js supports this natively, and it avoids re-running the server component on every keystroke.
 - **Tests live in `tests/simulate/*.test.ts`** (one file per module), not a single `tests/simulate.test.ts`.
 - **Each `SimEvent` carries a `key`**, its dedupe key, used for React keys and in tests.
+
+**Changes made during execution (from task reviews):** `inputs.ts` parses numbers with `Number()` instead of zod (keeps zod out of the client bundle); routing notices were reworded; the verdict messages, event wording and credit-aware `credit_used_up` events were rewritten; month-1 overages are no longer events; the view follows URL changes via `useSearchParams`; chart hatching is per service. The code is the source of truth where it differs from the snippets below.
 
 **Conventions to follow:**
 - Engine files use relative imports (`../cost`, `../../units`). App and test files use `@/…`.
@@ -1683,7 +1685,9 @@ import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
 import type { SimInputs } from "@/lib/engine/simulate/inputs";
 
 const MONTH = 2_592_000;
-const atQps = (qps: number, extra: Partial<SimInputs> = {}) => inputsWith({ dbQueriesOverride: qps * MONTH, peakToAvg: 1, growthPct: 0, ...extra });
+// No file downloads, so Supabase egress stays inside Pro's allowance and only compute decides the verdict.
+const atQps = (qps: number, extra: Partial<SimInputs> = {}) =>
+  inputsWith({ dbQueriesOverride: qps * MONTH, peakToAvg: 1, growthPct: 0, fileDownloadMBPerUser: 0, ...extra });
 
 function verdict(inputs: SimInputs, catalog = TEST_CATALOG) {
   return cacheVerdict(inputs, resolveStack(inputs).stack, catalog, 12);
@@ -1916,7 +1920,9 @@ import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
 
 const NOW = new Date("2026-10-27T12:00:00Z");
 const run = (inputs: SimInputs, catalog = TEST_CATALOG) => simulate(inputs, { catalog, now: NOW });
-const atQps = (qps: number, extra: Partial<SimInputs> = {}) => inputsWith({ dbQueriesOverride: qps * 2_592_000, peakToAvg: 1, growthPct: 0, ...extra });
+// No file downloads, so Supabase egress stays inside Pro's allowance and only compute decides the verdict.
+const atQps = (qps: number, extra: Partial<SimInputs> = {}) =>
+  inputsWith({ dbQueriesOverride: qps * 2_592_000, peakToAvg: 1, growthPct: 0, fileDownloadMBPerUser: 0, ...extra });
 
 describe("simulate", () => {
   it("produces 12 finite, non-negative months for every preset with the real catalog", () => {
@@ -2015,9 +2021,11 @@ import { type Catalog, type ComputeKey, type ComputeSize, type Service, sheetFor
 import { formatAmount, formatQps } from "./format";
 import type { SimInputs } from "./inputs";
 import { enabledPlans, type LineItem, priceMonth } from "./price";
-import { DIRECT_REASON, type ResolvedStack } from "./stack";
+import { DIRECT_REASON, NO_SUPABASE_REASON, type ResolvedStack } from "./stack";
 import { type MonthUsage, workloadMonths } from "./workload";
 ```
+
+(Keep any other names the file already imports, such as `computeSize` from `./catalog`; merge rather than replace.)
 
 Then append to the end of the file:
 
@@ -2122,7 +2130,7 @@ export function collectEvents(months: MonthResult[], verdict: CacheVerdict, stac
       month: verdict.paysOffMonth,
       kind: "cache_pays_off",
       service: "upstash",
-      message: "From this month a cache costs less than the compute or egress it saves.",
+      message: "From this month a cache is the better option: it costs less than it saves, or it's needed to keep up with load.",
     });
   }
   return events.sort((a, b) => a.month - b.month);
