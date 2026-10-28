@@ -3618,6 +3618,8 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 `getSession()` now returns `{ user, workspace, scope }`. Wherever an action used `supabase` (the RLS-bound client) it now passes `scope` to a repository; wherever it used `adminClient()` after checking ownership it now calls a repository or `db` with the same workspace. Repository modules are imported as namespaces (`import * as inventory …`) because several actions have the same names as repository functions.
 
+Wherever the code below calls `dbErrorMessage(e)` (it turns a database error into safe text: Drizzle's own `e.message` contains the SQL and every bound parameter), add `import { dbErrorMessage } from "@/db/errors";` to that file's imports. Never put a raw `e.message` from a database call into a redirect, a form state or a log.
+
 - [ ] **Step 1: Replace `src/app/(app)/settings/actions.ts`**
 
 ```ts
@@ -3678,7 +3680,7 @@ export async function updateNotifications(form: FormData) {
   try {
     await account.updateWorkspace(scope, { ...parsed.data!, alert_email: parsed.data!.alert_email || null });
   } catch (e) {
-    failure = e instanceof Error ? e.message : String(e);
+    failure = dbErrorMessage(e);
   }
   if (failure) fail(failure); // outside the try: redirect() works by throwing
   await audit({ workspaceId: workspace.id, actorId: user.id, action: "settings.notifications" });
@@ -3824,7 +3826,7 @@ Replace the `assignResource` statements from `await supabase.from("application_r
     try {
       await applicationsRepo.assignResources(scope, uuid.parse(appId), [resourceId]);
     } catch (e) {
-      throw new Error(`Could not assign resource: ${e instanceof Error ? e.message : String(e)}`);
+      throw new Error(`Could not assign resource: ${dbErrorMessage(e)}`);
     }
   } else {
     await applicationsRepo.unassignResource(scope, resourceId);
@@ -3893,7 +3895,7 @@ change `for (const rule of rules ?? []) {` to `for (const rule of rules) {`, and
     try {
       await alertsRepo.updateAlertRule(scope, rule.id, patch);
     } catch (e) {
-      failure = e instanceof Error ? e.message : String(e);
+      failure = dbErrorMessage(e);
       break;
     }
 ```
@@ -3914,7 +3916,7 @@ export async function createApplication(form: FormData) {
   try {
     id = await applicationsRepo.createApplication(scope, { name: parsed.data.name, description: parsed.data.description ?? null });
   } catch (e) {
-    failure = isUniqueViolation(e) ? "An application with that name already exists." : e instanceof Error ? e.message : String(e);
+    failure = isUniqueViolation(e) ? "An application with that name already exists." : dbErrorMessage(e);
   }
   if (failure || !id) redirect(withParams("/applications", { error: failure ?? "Could not create the application." }));
   revalidatePath("/", "layout");
@@ -3930,7 +3932,7 @@ export async function updateApplication(form: FormData) {
   try {
     await applicationsRepo.updateApplication(scope, id, { name: parsed.data.name, description: parsed.data.description ?? null });
   } catch (e) {
-    failure = isUniqueViolation(e) ? "That name is already used." : e instanceof Error ? e.message : String(e);
+    failure = isUniqueViolation(e) ? "That name is already used." : dbErrorMessage(e);
   }
   if (failure) redirect(withParams(`/applications/${id}`, { error: failure }));
   revalidatePath("/", "layout");
@@ -3956,7 +3958,7 @@ export async function addResources(form: FormData) {
     try {
       await applicationsRepo.assignResources(scope, applicationId, ids);
     } catch (e) {
-      failure = e instanceof Error ? e.message : String(e);
+      failure = dbErrorMessage(e);
     }
     if (failure) redirect(withParams(`/applications/${applicationId}`, { error: failure }));
     await recalculateWorkspace(workspace.id);
@@ -3990,7 +3992,7 @@ In `saveQuota`: change `const { supabase, user, workspace } = await getSession()
   try {
     await quotasRepo.saveUserQuota(scope, { metric_key: metricKey, scope_type: scopeType, scopeId, unit: metric.unit }, row);
   } catch (e) {
-    return { error: `Could not save the limit: ${e instanceof Error ? e.message : String(e)}` };
+    return { error: `Could not save the limit: ${dbErrorMessage(e)}` };
   }
 ```
 
@@ -4015,7 +4017,7 @@ In `applyPlanAllowance`: destructure `{ scope, user, workspace }` and replace fr
         },
       );
     } catch (e) {
-      failure ??= e instanceof Error ? e.message : String(e);
+      failure ??= dbErrorMessage(e);
     }
   }
   if (failure) throw new Error(`Could not apply allowance: ${failure}`);
