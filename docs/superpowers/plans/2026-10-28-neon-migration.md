@@ -136,8 +136,9 @@ NEON_BRANCH=dev
 NEON_AUTH_BASE_URL=
 # 32+ random characters. Generate with: openssl rand -base64 32
 NEON_AUTH_COOKIE_SECRET=
-# Direct connection string of a separate Neon branch used only by `npm test` integration tests.
-# Must NOT be the same branch as DATABASE_URL. Leave empty to skip those tests.
+# Direct connection string of the Neon branch `npm test` integration tests run on. It may be the
+# same branch as DATABASE_URL (the tests only create and delete their own random users); use a
+# separate branch if that branch holds data you care about. Leave empty to skip those tests.
 DATABASE_URL_TEST=
 ```
 
@@ -887,7 +888,7 @@ Expected: `Applied: 0001_init.sql`. Running it again prints `Database is up to d
 
 - [ ] **Step 5: Create the `test` branch (manual, user)**
 
-In the Neon console create branch `test` from `dev` (it now contains the schema). Copy its **direct (unpooled)** connection string into `.env.local` as `DATABASE_URL_TEST=…`. Tests will also run `migrate()` themselves, so a branch created before this step also works.
+Decision (project owner): no separate `test` branch. Integration tests run on the `dev` branch, so set `DATABASE_URL_TEST` in `.env.local` to the same **direct (unpooled)** connection string as `DATABASE_URL_UNPOOLED`. Tests run `migrate()` themselves, which is a no-op on `dev`. (A separate branch is safer if `dev` ever holds data you care about; see `tests/helpers/test-db.ts`.)
 
 - [ ] **Step 6: Commit**
 
@@ -930,19 +931,16 @@ if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 export const testUrl = process.env.DATABASE_URL_TEST;
 export const hasTestDb = Boolean(testUrl);
 
-const hostOf = (url?: string) => (url ? new URL(url).host.replace("-pooler", "") : "");
-
 /**
- * Points the app's `db` at the test branch and applies migrations to it.
+ * Points the app's `db` at DATABASE_URL_TEST and applies migrations to it.
  * Call (and await) before importing anything from "@/db/*" in a test file.
+ *
+ * DATABASE_URL_TEST may be the same Neon branch as DATABASE_URL (the project owner chose to
+ * test on `dev`). That is safe only because the tests create users with random ids and delete
+ * exactly those in `afterAll`; a test must never drop, truncate or bulk-delete anything.
  */
 export async function useTestDb() {
   const url = testUrl!;
-  for (const other of [process.env.DATABASE_URL, process.env.DATABASE_URL_UNPOOLED]) {
-    if (other && hostOf(other) === hostOf(url)) {
-      throw new Error("DATABASE_URL_TEST must point at a different Neon branch than DATABASE_URL");
-    }
-  }
   process.env.DATABASE_URL = url;
   const { migrate } = await import("@/db/migrate");
   await migrate(url);
@@ -4465,7 +4463,7 @@ Change list item 4 to `4. Explore **Home**, **Usage**, **Limits & quotas** and *
 In the scripts table replace the `npm test`, `db:reset` and `db:types` rows with:
 
 ```markdown
-| `npm test` | Unit tests, plus database integration tests when `DATABASE_URL_TEST` points at a separate Neon branch |
+| `npm test` | Unit tests, plus database integration tests when `DATABASE_URL_TEST` is set |
 | `npm run db:migrate` | Apply `db/migrations/*.sql` to the branch in `DATABASE_URL_UNPOOLED` |
 | `npm run db:reset -- --yes` | Wipe and re-create the app schema on the `dev` branch (refuses unless `NEON_BRANCH=dev`) |
 ```
