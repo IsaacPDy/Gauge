@@ -8,18 +8,20 @@ It implements checkpoints 1–6 of the PRD (`writing-block.md`): the full MVP de
 
 ## Quick start (local)
 
-Prerequisites: Node 20.9+, Docker Desktop (running), and the Supabase CLI.
+Prerequisites: Node 20.9+ and a free Neon account (https://neon.com).
+
+Create a Neon project with a `dev` branch, enable **Auth** on that branch, and put its connection strings and Auth URL in `.env.local` (see `.env.example`). Then:
 
 ```bash
 npm install
 ```
 
 ```bash
-npm run db:start
+npm run setup:env
 ```
 
 ```bash
-npm run setup:env
+npm run db:migrate
 ```
 
 ```bash
@@ -31,9 +33,9 @@ Then open http://localhost:3100. The app uses port 3100 so it does not collide w
 1. Create an account. A private workspace is created automatically.
 2. **Providers → Add demo connection** (or **Connect Supabase** with a personal access token or OAuth).
 3. Choose the resources to monitor. Usage history appears within seconds.
-4. Explore **Home**, **Usage**, **Limits & quotas** and **Alerts**. Alert emails land in the local Mailpit inbox at http://127.0.0.1:54324.
+4. Explore **Home**, **Usage**, **Limits & quotas** and **Alerts**. In development alert emails are printed to the server log (`EMAIL_TRANSPORT=console`).
 
-`setup:env` writes `.env.local` from `supabase status` and generates the credential encryption key and cron secret. It keeps existing values, so it is safe to re-run. A local test account's credentials are stored in `.env.local` (`TEST_USER_*`).
+`setup:env` creates `.env.local` from `.env.example` and generates the credential encryption key, cron secret and auth cookie secret. It keeps existing values, so it is safe to re-run. In development, Neon Auth sends its verification and password-reset emails through Neon's shared sender.
 
 ### Scripts
 
@@ -41,10 +43,10 @@ Then open http://localhost:3100. The app uses port 3100 so it does not collide w
 |---|---|
 | `npm run dev` | Next.js dev server on :3100. With `RUN_SCHEDULER_IN_PROCESS=true` it also runs collection and alert delivery every 60 s |
 | `npm run worker` / `worker:once` | Standalone scheduler loop / single pass (for production-style setups) |
-| `npm test` | Unit tests plus RLS isolation tests (the latter run when the local Supabase stack is up) |
+| `npm test` | Unit tests, plus database integration tests when `DATABASE_URL_TEST` is set |
 | `npm run typecheck` | TypeScript check |
-| `npm run db:reset` | Re-create the local database from `supabase/migrations` |
-| `npm run db:types` | Regenerate `src/lib/supabase/database.types.ts` after schema changes |
+| `npm run db:migrate` | Apply `db/migrations/*.sql` to the branch in `DATABASE_URL_UNPOOLED` |
+| `npm run db:reset -- --yes` | Wipe and re-create the app schema on the `dev` branch (refuses unless `NEON_BRANCH=dev`) |
 
 ## Architecture
 
@@ -52,7 +54,7 @@ Then open http://localhost:3100. The app uses port 3100 so it does not collide w
 Provider APIs ──▶ Adapters (src/lib/providers) ──▶ Sync job (jobs/sync.ts)
                                                      │  idempotent upserts
                                                      ▼
-                                     PostgreSQL (Supabase, RLS per workspace)
+                                     PostgreSQL (Neon, workspace-scoped repositories)
                                                      │
                      Recalculation (jobs/recalc.ts): quota evaluations, forecasts,
                      cost estimates, alert evaluation, dedupe/escalation, delivery queue
@@ -65,7 +67,7 @@ Provider APIs ──▶ Adapters (src/lib/providers) ──▶ Sync job (jobs/sy
 
 | Area | Where | Notes |
 |---|---|---|
-| Schema, RLS, privileges | `supabase/migrations/` | Every workspace table is RLS-scoped. Users get only column-level grants they need. `provider_credentials` and `oauth_states` have no grants at all. |
+| Schema and access control | `db/migrations/`, `src/db/` | SQL-first migrations; a Drizzle schema for typed queries. Access control lives in `src/db/scope.ts`: every user-facing query goes through a repository in `src/db/repos/` that needs a `WorkspaceScope`. Repositories never touch `provider_credentials` or `oauth_states`. |
 | Provider adapters | `src/lib/providers/` | Common interface with a declared capability model. Unsupported data is reported as `unsupported`, never invented or shown as zero. |
 | Pure engine | `src/lib/engine/` | Billing cycles, usage aggregation (gauge / cumulative / incremental), forecasting, cost estimates, alert evaluation and connection health. Deterministic and unit-tested. |
 | Jobs | `src/lib/jobs/` | Sync (discover → collect → persist), recalculation, notifications, scheduler. Connections are claimed with `FOR UPDATE SKIP LOCKED`, so workers can run in parallel. |
@@ -110,18 +112,18 @@ Verified on 2026-10-09 against the Management API OpenAPI spec and the "Manage y
 
 ## Deploying
 
-1. **Database.** Create a Supabase project, then run `supabase link` and `supabase db push`. In Auth settings, enable email confirmations, set the Site URL to your domain, and configure SMTP.
-2. **App.** Deploy to Vercel or any Node host, with these env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `APP_URL`, `CREDENTIALS_ENCRYPTION_KEY`, `CRON_SECRET`, the email settings (`EMAIL_TRANSPORT=resend` + `RESEND_API_KEY`, or SMTP), and optionally the Supabase OAuth credentials. Set `ENABLE_DEMO_PROVIDER=false` and `RUN_SCHEDULER_IN_PROCESS=false`.
+1. **Database and auth.** In Neon, use the `main` branch for production. Apply the schema with `DATABASE_URL_UNPOOLED=<main direct url> npm run db:migrate`. In the branch's Auth settings add your production domain as a trusted domain, set up a custom email provider, and enable email verification (see Neon's auth production checklist).
+2. **App.** Deploy to Vercel or any Node host, with these env vars: `DATABASE_URL`, `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, `APP_URL`, `CREDENTIALS_ENCRYPTION_KEY`, `CRON_SECRET`, the email settings (`EMAIL_TRANSPORT=resend` + `RESEND_API_KEY`, or SMTP), and optionally the Supabase OAuth credentials. Set `ENABLE_DEMO_PROVIDER=false` and `RUN_SCHEDULER_IN_PROCESS=false`.
 3. **Scheduling.** `vercel.json` calls `/api/cron/tick` every 15 minutes, and Vercel sends `Authorization: Bearer $CRON_SECRET` automatically. Vercel's Hobby plan only allows daily crons. Elsewhere, run `npm run worker` as a separate process, or have any scheduler call the endpoint with the bearer token. Each connection's collection interval defaults to 6 hours.
 
 ## Tests
 
-`npm test` runs 142 tests:
+`npm test` runs the unit tests and, when `DATABASE_URL_TEST` is set, the database integration tests:
 
 - **Engine**: cycles, aggregation, forecasting (including reset boundaries and reproducibility), costs, alert dedupe keys, health, units, and failure backoff.
 - **Supabase adapter**: mocked API covering parsing, per-metric failures, auth aborts, paused projects, retries and rate limits.
 - **Cost simulator**: price catalog structure, URL encoding and presets, stack routing, the workload model, pricing and unit conversions, compute choice and the cache verdict, events, and every preset against the real catalog.
-- **RLS isolation**: two real users against the local database. They check cross-workspace reads and writes, that credentials can't be read, that provider quotas can't be written by users, column grants, and the worker RPCs.
+- **Database** (needs `DATABASE_URL_TEST`): schema parity with the migrations, workspace bootstrap, and workspace isolation of the repositories. They run on the Neon branch in `DATABASE_URL_TEST`, which may be the same as the dev branch; they create and delete their own random test users and leave other data alone.
 
 ## Not yet built (later checkpoints)
 

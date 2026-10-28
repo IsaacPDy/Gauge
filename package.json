@@ -13,16 +13,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:start": "supabase start",
-    "db:reset": "supabase db reset",
-    "setup:env": "node scripts/setup-env.mjs",
-    "db:types": "supabase gen types typescript --local > src/lib/supabase/database.types.ts"
+    "db:reset": "tsx --env-file=.env.local scripts/db-reset.ts",
+    "setup:env": "node scripts/setup-env.mjs"
   },
   "dependencies": {
     "@neondatabase/auth": "^0.7.0-beta",
     "@neondatabase/serverless": "^1.2.0",
-    "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.117.3",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.4",
     "lucide-react": "^1.54.0",
