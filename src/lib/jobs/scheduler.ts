@@ -1,5 +1,7 @@
-import { adminClient } from "../supabase/admin";
-import { must } from "./db";
+import { ne } from "drizzle-orm";
+import { claimDueConnections } from "../../db/claims";
+import { db } from "../../db/client";
+import { provider_connections } from "../../db/schema";
 import { deliverDueNotifications } from "./notify";
 import { recalculateWorkspace } from "./recalc";
 import { ensureReferenceData } from "./reference";
@@ -25,8 +27,7 @@ export async function runSchedulerTick(now = new Date()): Promise<TickSummary> {
   running = true;
   try {
     await ensureReferenceData();
-    const admin = adminClient();
-    const due = must(await admin.rpc("claim_due_connections", { p_limit: 10 }), "Claim due connections") ?? [];
+    const due = await claimDueConnections(10);
 
     const synced: TickSummary["synced"] = [];
     const touched = new Set<string>();
@@ -44,10 +45,10 @@ export async function runSchedulerTick(now = new Date()): Promise<TickSummary> {
 
     if (Date.now() - lastHealthSweep > HEALTH_SWEEP_MS) {
       lastHealthSweep = Date.now();
-      const rows = must(
-        await admin.from("provider_connections").select("workspace_id").neq("status", "disconnected"),
-        "List monitored workspaces",
-      );
+      const rows = await db
+        .selectDistinct({ workspace_id: provider_connections.workspace_id })
+        .from(provider_connections)
+        .where(ne(provider_connections.status, "disconnected"));
       for (const r of rows) touched.add(r.workspace_id);
     }
 

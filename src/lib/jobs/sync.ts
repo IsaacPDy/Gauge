@@ -1,3 +1,10 @@
+import { and, eq, inArray } from "drizzle-orm";
+import { claimConnection } from "../../db/claims";
+import { db } from "../../db/client";
+import type { Json } from "../../db/json";
+import { cost_records, provider_accounts, provider_connections, provider_resources, quota_rules, sync_runs, usage_samples } from "../../db/schema";
+import { excludedFrom } from "../../db/sql";
+import type { Row } from "../../db/types";
 import { billingCycle, DAY_MS, startOfUtcDay, type Cycle } from "../engine/time";
 import { findPricingRule, getAdapter, getMetric } from "../providers/registry";
 import {
@@ -8,14 +15,12 @@ import {
   type ProviderErrorCode,
   type ScopeRef,
 } from "../providers/types";
-import { adminClient, type AdminClient } from "../supabase/admin";
-import type { Database, Json } from "../supabase/database.types";
 import type { ConnectionStatus } from "../types";
 import { loadCredentials } from "./credentials";
-import { chunk, must } from "./db";
+import { chunk } from "./db";
 import { ensureReferenceData } from "./reference";
 
-type Connection = Database["public"]["Tables"]["provider_connections"]["Row"];
+type Connection = Row<"provider_connections">;
 export type SyncTrigger = "scheduled" | "manual" | "connect";
 
 export interface SyncSummary {
@@ -38,48 +43,39 @@ export async function runConnectionSync(
   trigger: SyncTrigger,
   opts: { alreadyClaimed?: boolean; now?: Date } = {},
 ): Promise<SyncSummary> {
-  const admin = adminClient();
   const now = opts.now ?? new Date();
   await ensureReferenceData();
 
-  let conn: Connection | undefined;
-  if (opts.alreadyClaimed) {
-    conn = must(await admin.from("provider_connections").select("*").eq("id", connectionId).maybeSingle(), "Load connection") ?? undefined;
-  } else {
-    const claimed = must(await admin.rpc("claim_connection", { p_connection_id: connectionId }), "Claim connection");
-    conn = claimed?.[0];
-  }
+  const conn: Connection | undefined = opts.alreadyClaimed
+    ? (await db.select().from(provider_connections).where(eq(provider_connections.id, connectionId)).limit(1))[0]
+    : await claimConnection(connectionId);
   if (!conn) return { connectionId, workspaceId: "", status: "skipped", message: "Connection is busy or disconnected" };
 
-  const run = must(
-    await admin
-      .from("sync_runs")
-      .insert({ workspace_id: conn.workspace_id, connection_id: conn.id, trigger })
-      .select("id")
-      .single(),
-    "Start sync run",
-  );
+  const [run] = await db
+    .insert(sync_runs)
+    .values({ workspace_id: conn.workspace_id, connection_id: conn.id, trigger })
+    .returning({ id: sync_runs.id });
 
   const stats: Record<string, number> = {};
   try {
     const adapter = getAdapter(conn.provider);
     if (!adapter) throw new ProviderError("unknown", `No integration available for provider "${conn.provider}"`, { retryable: false });
 
-    const credentials = await loadCredentials(admin, conn, now);
+    const credentials = await loadCredentials(conn, now);
     const ctx = { credentials, now };
 
     const discoveryDue =
       trigger !== "scheduled" || !conn.last_discovery_at || now.getTime() - Date.parse(conn.last_discovery_at) > DISCOVERY_EVERY_MS;
     if (discoveryDue) {
       const discovery = await adapter.discover(ctx);
-      Object.assign(stats, await persistDiscovery(admin, conn, discovery, now));
+      Object.assign(stats, await persistDiscovery(conn, discovery, now));
     }
 
-    const target = await buildTarget(admin, conn, now);
+    const target = await buildTarget(conn, now);
     let outcomes: MetricOutcome[] = [];
     if (target.resources.length > 0) {
       const result = await adapter.collect(ctx, target.collect);
-      Object.assign(stats, await persistCollection(admin, conn, result, target, run.id, now));
+      Object.assign(stats, await persistCollection(conn, result, target, run.id, now));
       outcomes = result.outcomes;
     }
 
@@ -89,7 +85,7 @@ export async function runConnectionSync(
       ? `${failed.length} metric reading${failed.length === 1 ? "" : "s"} failed${permissionGaps ? ` (${permissionGaps} due to missing permissions)` : ""}. See the capability table.`
       : null;
 
-    await updateConnection(admin, conn, {
+    await updateConnection(conn, {
       status: "connected",
       status_detail: detail,
       last_success_at: now.toISOString(),
@@ -101,31 +97,25 @@ export async function runConnectionSync(
     });
 
     const status = failed.length ? "partial" : "succeeded";
-    await admin
-      .from("sync_runs")
-      .update({ status, finished_at: new Date().toISOString(), stats: { ...stats, metricErrors: failed.length } })
-      .eq("id", run.id);
+    await db
+      .update(sync_runs)
+      .set({ status, finished_at: new Date().toISOString(), stats: { ...stats, metricErrors: failed.length } })
+      .where(eq(sync_runs.id, run.id));
     return { connectionId: conn.id, workspaceId: conn.workspace_id, status };
   } catch (e) {
     const err = e instanceof ProviderError ? e : new ProviderError("unknown", e instanceof Error ? e.message : String(e), { retryable: false });
     const plan = failurePlan(conn, err, now);
-    await updateConnection(admin, conn, {
+    await updateConnection(conn, {
       status: plan.status,
       status_detail: plan.detail,
       consecutive_failures: conn.consecutive_failures + 1,
       last_error_code: err.code,
       next_sync_at: plan.nextSyncAt?.toISOString() ?? null,
     });
-    await admin
-      .from("sync_runs")
-      .update({
-        status: "failed",
-        finished_at: new Date().toISOString(),
-        error_code: err.code,
-        error_message: err.message.slice(0, 500),
-        stats,
-      })
-      .eq("id", run.id);
+    await db
+      .update(sync_runs)
+      .set({ status: "failed", finished_at: new Date().toISOString(), error_code: err.code, error_message: err.message.slice(0, 500), stats })
+      .where(eq(sync_runs.id, run.id));
     return { connectionId: conn.id, workspaceId: conn.workspace_id, status: "failed", errorCode: err.code, message: err.message };
   }
 }
@@ -162,17 +152,12 @@ export function failurePlan(
   }
 }
 
-async function updateConnection(admin: AdminClient, conn: Connection, patch: Partial<Connection>) {
+async function updateConnection(conn: Connection, patch: Partial<Connection>) {
   const statusChanged = patch.status !== undefined && patch.status !== conn.status;
-  const { error } = await admin
-    .from("provider_connections")
-    .update({
-      ...patch,
-      ...(statusChanged ? { status_changed_at: new Date().toISOString() } : {}),
-      locked_until: null,
-    })
-    .eq("id", conn.id);
-  if (error) throw new Error(`Updating connection failed: ${error.message}`);
+  await db
+    .update(provider_connections)
+    .set({ ...patch, ...(statusChanged ? { status_changed_at: new Date().toISOString() } : {}), locked_until: null })
+    .where(eq(provider_connections.id, conn.id));
 }
 
 function mergeOutcomes(previous: Json, declared: object, outcomes: MetricOutcome[], now: Date): Json {
@@ -197,74 +182,82 @@ function mergeOutcomes(previous: Json, declared: object, outcomes: MetricOutcome
 // (monitoring flag, application grouping, billing-cycle day) are never overwritten.
 // ---------------------------------------------------------------------------
 
-async function persistDiscovery(admin: AdminClient, conn: Connection, d: Discovery, now: Date) {
+async function persistDiscovery(conn: Connection, d: Discovery, now: Date) {
   const seen = now.toISOString();
   if (d.accounts.length) {
-    must(
-      await admin.from("provider_accounts").upsert(
-        d.accounts.map((a) => ({
-          workspace_id: conn.workspace_id,
-          connection_id: conn.id,
-          provider: conn.provider,
-          external_id: a.externalId,
-          name: a.name,
-          account_type: a.accountType,
-          plan: a.plan,
-          billing_currency: a.billingCurrency,
-          dashboard_url: a.dashboardUrl,
-          metadata: (a.metadata ?? {}) as Json,
-          status: "active",
-          last_seen_at: seen,
-        })),
-        { onConflict: "connection_id,external_id" },
-      ),
-      "Upsert accounts",
-    );
+    const rows = d.accounts.map((a) => ({
+      workspace_id: conn.workspace_id,
+      connection_id: conn.id,
+      provider: conn.provider,
+      external_id: a.externalId,
+      name: a.name,
+      account_type: a.accountType,
+      plan: a.plan,
+      billing_currency: a.billingCurrency,
+      dashboard_url: a.dashboardUrl,
+      metadata: (a.metadata ?? {}) as Json,
+      status: "active",
+      last_seen_at: seen,
+    }));
+    await db
+      .insert(provider_accounts)
+      .values(rows)
+      .onConflictDoUpdate({
+        target: [provider_accounts.connection_id, provider_accounts.external_id],
+        set: excludedFrom(provider_accounts, rows[0], ["connection_id", "external_id"]),
+      });
   }
-  const accounts = must(
-    await admin.from("provider_accounts").select("id, external_id, status").eq("connection_id", conn.id),
-    "Load accounts",
-  );
+  const accounts = await db
+    .select({ id: provider_accounts.id, external_id: provider_accounts.external_id, status: provider_accounts.status })
+    .from(provider_accounts)
+    .where(eq(provider_accounts.connection_id, conn.id));
   const accountIds = new Map(accounts.map((a) => [a.external_id, a.id]));
   const goneAccounts = accounts.filter((a) => !d.accounts.some((x) => x.externalId === a.external_id) && a.status === "active");
   if (goneAccounts.length) {
-    await admin.from("provider_accounts").update({ status: "inaccessible" }).in("id", goneAccounts.map((a) => a.id));
+    await db.update(provider_accounts).set({ status: "inaccessible" }).where(inArray(provider_accounts.id, goneAccounts.map((a) => a.id)));
   }
 
   if (d.resources.length) {
     for (const part of chunk(d.resources, 500)) {
-      must(
-        await admin.from("provider_resources").upsert(
-          part.map((r) => ({
-            workspace_id: conn.workspace_id,
-            connection_id: conn.id,
-            account_id: r.accountExternalId ? (accountIds.get(r.accountExternalId) ?? null) : null,
-            provider: conn.provider,
-            external_id: r.externalId,
-            name: r.name,
-            resource_type: r.resourceType,
-            region: r.region,
-            plan: r.plan,
-            provider_status: r.providerStatus,
-            status: r.status,
-            dashboard_url: r.dashboardUrl,
-            metadata: (r.metadata ?? {}) as Json,
-            last_seen_at: seen,
-          })),
-          { onConflict: "connection_id,resource_type,external_id" },
-        ),
-        "Upsert resources",
-      );
+      const rows = part.map((r) => ({
+        workspace_id: conn.workspace_id,
+        connection_id: conn.id,
+        account_id: r.accountExternalId ? (accountIds.get(r.accountExternalId) ?? null) : null,
+        provider: conn.provider,
+        external_id: r.externalId,
+        name: r.name,
+        resource_type: r.resourceType,
+        region: r.region,
+        plan: r.plan,
+        provider_status: r.providerStatus,
+        status: r.status,
+        dashboard_url: r.dashboardUrl,
+        metadata: (r.metadata ?? {}) as Json,
+        last_seen_at: seen,
+      }));
+      // is_monitored is not in the row, so a user's monitoring choice survives re-discovery.
+      await db
+        .insert(provider_resources)
+        .values(rows)
+        .onConflictDoUpdate({
+          target: [provider_resources.connection_id, provider_resources.resource_type, provider_resources.external_id],
+          set: excludedFrom(provider_resources, rows[0], ["connection_id", "resource_type", "external_id"]),
+        });
     }
   }
-  const resources = must(
-    await admin.from("provider_resources").select("id, external_id, resource_type, status").eq("connection_id", conn.id),
-    "Load resources",
-  );
+  const resources = await db
+    .select({
+      id: provider_resources.id,
+      external_id: provider_resources.external_id,
+      resource_type: provider_resources.resource_type,
+      status: provider_resources.status,
+    })
+    .from(provider_resources)
+    .where(eq(provider_resources.connection_id, conn.id));
   const seenKeys = new Set(d.resources.map((r) => `${r.resourceType}|${r.externalId}`));
   const gone = resources.filter((r) => !seenKeys.has(`${r.resource_type}|${r.external_id}`) && r.status === "active");
   if (gone.length) {
-    await admin.from("provider_resources").update({ status: "inaccessible" }).in("id", gone.map((r) => r.id));
+    await db.update(provider_resources).set({ status: "inaccessible" }).where(inArray(provider_resources.id, gone.map((r) => r.id)));
   }
   return { accountsDiscovered: d.accounts.length, resourcesDiscovered: d.resources.length, resourcesNowInaccessible: gone.length };
 }
@@ -279,24 +272,26 @@ interface Target {
   accounts: { id: string; externalId: string; plan: string | null; cycle: Cycle }[];
 }
 
-async function buildTarget(admin: AdminClient, conn: Connection, now: Date): Promise<Target> {
-  const accounts = must(
-    await admin
-      .from("provider_accounts")
-      .select("id, external_id, plan, billing_cycle_anchor_day")
-      .eq("connection_id", conn.id)
-      .eq("status", "active"),
-    "Load accounts",
-  );
-  const resources = must(
-    await admin
-      .from("provider_resources")
-      .select("id, external_id, account_id, provider_status, last_collected_at")
-      .eq("connection_id", conn.id)
-      .eq("status", "active")
-      .eq("is_monitored", true),
-    "Load monitored resources",
-  );
+async function buildTarget(conn: Connection, now: Date): Promise<Target> {
+  const accounts = await db
+    .select({
+      id: provider_accounts.id,
+      external_id: provider_accounts.external_id,
+      plan: provider_accounts.plan,
+      billing_cycle_anchor_day: provider_accounts.billing_cycle_anchor_day,
+    })
+    .from(provider_accounts)
+    .where(and(eq(provider_accounts.connection_id, conn.id), eq(provider_accounts.status, "active")));
+  const resources = await db
+    .select({
+      id: provider_resources.id,
+      external_id: provider_resources.external_id,
+      account_id: provider_resources.account_id,
+      provider_status: provider_resources.provider_status,
+      last_collected_at: provider_resources.last_collected_at,
+    })
+    .from(provider_resources)
+    .where(and(eq(provider_resources.connection_id, conn.id), eq(provider_resources.status, "active"), eq(provider_resources.is_monitored, true)));
   const acc = accounts.map((a) => ({
     id: a.id,
     externalId: a.external_id,
@@ -331,7 +326,7 @@ async function buildTarget(admin: AdminClient, conn: Connection, now: Date): Pro
   };
 }
 
-async function persistCollection(admin: AdminClient, conn: Connection, result: CollectResult, target: Target, runId: string, now: Date) {
+async function persistCollection(conn: Connection, result: CollectResult, target: Target, runId: string, now: Date) {
   const resByExt = new Map(target.resources.map((r) => [r.externalId, r]));
   const accByExt = new Map(target.accounts.map((a) => [a.externalId, a]));
   const resolve = (scope: ScopeRef): { account_id: string | null; resource_id: string | null } | null => {
@@ -344,7 +339,7 @@ async function persistCollection(admin: AdminClient, conn: Connection, result: C
   };
 
   // Usage samples: one row per (scope, metric, bucket). Re-collection overwrites.
-  const samples = [];
+  const samples: (typeof usage_samples.$inferInsert)[] = [];
   for (const o of result.observations) {
     const metric = getMetric(o.metricKey);
     const ids = resolve(o.scope);
@@ -365,21 +360,23 @@ async function persistCollection(admin: AdminClient, conn: Connection, result: C
       collected_at: now.toISOString(),
       source: o.source,
       quality: o.quality,
-      dimensions: (o.dimensions ?? null) as Json,
+      dimensions: (o.dimensions ?? null) as Json | null,
       sync_run_id: runId,
     });
   }
+  const sampleKey = ["connection_id", "metric_key", "account_id", "resource_id", "bucket_start"];
   for (const part of chunk(samples, 500)) {
-    must(
-      await admin
-        .from("usage_samples")
-        .upsert(part, { onConflict: "connection_id,metric_key,account_id,resource_id,bucket_start" }),
-      "Upsert usage samples",
-    );
+    await db
+      .insert(usage_samples)
+      .values(part)
+      .onConflictDoUpdate({
+        target: [usage_samples.connection_id, usage_samples.metric_key, usage_samples.account_id, usage_samples.resource_id, usage_samples.bucket_start],
+        set: excludedFrom(usage_samples, part[0], sampleKey),
+      });
   }
 
   // Provider-reported quotas. User-configured quotas live in separate rows and take precedence.
-  const quotas = [];
+  const quotas: (typeof quota_rules.$inferInsert)[] = [];
   for (const q of result.quotas) {
     const ids = resolve(q.scope);
     if (!ids || !getMetric(q.metricKey)) continue;
@@ -401,14 +398,17 @@ async function persistCollection(admin: AdminClient, conn: Connection, result: C
     });
   }
   if (quotas.length) {
-    must(
-      await admin.from("quota_rules").upsert(quotas, { onConflict: "workspace_id,metric_key,account_id,resource_id,source" }),
-      "Upsert provider quotas",
-    );
+    await db
+      .insert(quota_rules)
+      .values(quotas)
+      .onConflictDoUpdate({
+        target: [quota_rules.workspace_id, quota_rules.metric_key, quota_rules.account_id, quota_rules.resource_id, quota_rules.source],
+        set: excludedFrom(quota_rules, quotas[0], ["workspace_id", "metric_key", "account_id", "resource_id", "source"]),
+      });
   }
 
   // Provider-reported spend.
-  const costs = [];
+  const costs: (typeof cost_records.$inferInsert)[] = [];
   for (const c of result.costs) {
     const a = accByExt.get(c.accountExternalId);
     if (!a) continue;
@@ -428,12 +428,13 @@ async function persistCollection(admin: AdminClient, conn: Connection, result: C
     });
   }
   if (costs.length) {
-    must(
-      await admin
-        .from("cost_records")
-        .upsert(costs, { onConflict: "workspace_id,kind,metric_key,account_id,resource_id,period_start" }),
-      "Upsert reported costs",
-    );
+    await db
+      .insert(cost_records)
+      .values(costs)
+      .onConflictDoUpdate({
+        target: [cost_records.workspace_id, cost_records.kind, cost_records.metric_key, cost_records.account_id, cost_records.resource_id, cost_records.period_start],
+        set: excludedFrom(cost_records, costs[0], ["workspace_id", "kind", "metric_key", "account_id", "resource_id", "period_start"]),
+      });
   }
 
   const collectedIds = [
@@ -445,7 +446,7 @@ async function persistCollection(admin: AdminClient, conn: Connection, result: C
     ),
   ];
   if (collectedIds.length) {
-    await admin.from("provider_resources").update({ last_collected_at: now.toISOString() }).in("id", collectedIds);
+    await db.update(provider_resources).set({ last_collected_at: now.toISOString() }).where(inArray(provider_resources.id, collectedIds));
   }
 
   return { samplesStored: samples.length, providerQuotas: quotas.length, reportedCosts: costs.length };
