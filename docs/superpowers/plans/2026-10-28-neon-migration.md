@@ -3631,6 +3631,7 @@ import * as account from "@/db/repos/account";
 import { listConnections } from "@/db/repos/inventory";
 import { audit } from "@/lib/audit";
 import { auth } from "@/lib/auth/server";
+import { clearAuthCookies } from "@/lib/auth/cookies";
 import { deleteCredentials } from "@/lib/jobs/credentials";
 import { oauthConfigured, revokeTokens } from "@/lib/providers/supabase/oauth";
 import { getSession } from "@/lib/session";
@@ -3712,6 +3713,9 @@ export async function deleteAccount(form: FormData) {
   // Delete the login first: if Neon refuses, nothing of the user's data has been removed yet.
   const { error } = await auth.deleteUser();
   if (error) fail(`Could not delete the account: ${error.message ?? "unknown error"}`);
+  // The SDK trusts its cached session cookie for up to 5 minutes; drop it so the deleted account
+  // cannot be "resurrected" by ensureUserWorkspace() on the next request.
+  await clearAuthCookies();
   await deleteUserData(user.id);
   redirect("/login?deleted=1");
 }
@@ -4282,7 +4286,7 @@ and `const { data: deliveries } = await supabase.from("notification_deliveries")
 
 `src/app/(app)/alerts/rules/page.tsx`: add `import { listAlertRules } from "@/db/repos/alerts";` and replace `const { data } = await supabase.from("alert_rules").select("*");` with `const data = await listAlertRules(scope);`.
 
-`src/app/(app)/settings/page.tsx`: add `import { getProfile } from "@/db/repos/account";` and replace `const { data: profile } = await supabase.from("profiles")…maybeSingle();` with `const profile = await getProfile(scope);`.
+`src/app/(app)/settings/page.tsx`: add `import { getProfile } from "@/db/repos/account";` and replace `const { data: profile } = await supabase.from("profiles")…maybeSingle();` with `const profile = await getProfile(scope);`. The session's `user` is now just `{ id, email }`, so the page's "Member since" (it reads `user.created_at`) must read `profile?.created_at` instead; check the rest of the page for any other `user.*` field besides `id` and `email`.
 
 `src/app/(app)/providers/[id]/page.tsx`: add `import { listSyncRuns } from "@/db/repos/inventory";` and replace `const { data: runs } = await supabase.from("sync_runs")…limit(10);` with `const runs = await listSyncRuns(scope, conn.id, 10);`.
 
