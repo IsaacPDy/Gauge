@@ -55,6 +55,8 @@ Then open http://localhost:3100. The app uses port 3100 so it does not collide w
 
 Safari does not store the auth cookies over plain HTTP on localhost. Run `npm run dev -- --experimental-https` and open the https address it prints.
 
+**"An unexpected response was received from the server" when you submit a form (HTTP 431).** Cookies on `localhost` are shared by every app and port, so a browser profile that has run many local apps (old Supabase `sb-*-auth-token` cookies are the usual culprits) can send more than Node's default 16 KB of request headers. Node then rejects the request before the app sees it. `npm run dev` raises the limit to 64 KB, but the cleaner fix is to delete the stale `localhost` cookies in DevTools (Application > Cookies), or to use a separate browser profile for local development.
+
 ### Changing the schema
 
 1. Add a new `db/migrations/NNNN_name.sql` (never edit an applied migration).
