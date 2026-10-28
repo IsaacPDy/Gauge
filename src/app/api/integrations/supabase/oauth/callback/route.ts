@@ -1,9 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/db/client";
+import { dbErrorMessage } from "@/db/errors";
 import type { Json } from "@/db/json";
 import { oauth_states, provider_connections } from "@/db/schema";
 import { audit } from "@/lib/audit";
+import { auth } from "@/lib/auth/server";
 import { decryptSecret } from "@/lib/crypto";
 import { saveCredentials } from "@/lib/jobs/credentials";
 import { recalculateWorkspace } from "@/lib/jobs/recalc";
@@ -11,8 +13,7 @@ import { runConnectionSync } from "@/lib/jobs/sync";
 import { getAdapter } from "@/lib/providers/registry";
 import { SUPABASE_SCOPES } from "@/lib/providers/supabase/adapter";
 import { exchangeCode } from "@/lib/providers/supabase/oauth";
-import type { Credentials } from "@/lib/providers/types";
-import { auth } from "@/lib/auth/server";
+import { type Credentials, ProviderError } from "@/lib/providers/types";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,9 @@ export async function GET(request: NextRequest) {
     const tokens = await exchangeCode(code, verifier);
     credentials = { kind: "oauth", ...tokens };
     await getAdapter("supabase")!.validate({ credentials, now: new Date() });
-  } catch {
+  } catch (e) {
+    // Only the error's name and HTTP status: its message or cause could echo the code, tokens or verifier.
+    console.error("[oauth] token exchange or validation failed:", e instanceof Error ? e.name : "unknown error", e instanceof ProviderError ? e.options.status : undefined);
     return fail("Supabase did not accept the authorization. Please try again.");
   }
 
@@ -78,7 +81,8 @@ export async function GET(request: NextRequest) {
           created_by: user.id,
         })
         .returning({ id: provider_connections.id, workspace_id: provider_connections.workspace_id });
-    } catch {
+    } catch (e) {
+      console.error("[oauth] could not save the connection:", dbErrorMessage(e));
       return fail("Could not save the connection.");
     }
     if (!conn) return fail("Could not save the connection.");

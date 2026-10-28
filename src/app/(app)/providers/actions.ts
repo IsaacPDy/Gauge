@@ -38,7 +38,7 @@ function syncInBackground(connectionId: string, workspaceId: string, trigger: "m
       await runConnectionSync(connectionId, trigger);
       await recalculateWorkspace(workspaceId);
     } catch (e) {
-      console.error("[sync] background sync failed:", e);
+      console.error("[sync] background sync failed:", dbErrorMessage(e));
     }
   });
 }

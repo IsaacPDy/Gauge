@@ -10,6 +10,7 @@ import { listConnections } from "@/db/repos/inventory";
 import { audit } from "@/lib/audit";
 import { auth } from "@/lib/auth/server";
 import { clearAuthCookies } from "@/lib/auth/cookies";
+import { passwordChangeMessage } from "@/lib/auth/messages";
 import { deleteCredentials } from "@/lib/jobs/credentials";
 import { oauthConfigured, revokeTokens } from "@/lib/providers/supabase/oauth";
 import { getSession } from "@/lib/session";
@@ -71,7 +72,7 @@ export async function changePassword(form: FormData) {
   if (next !== form.get("confirm")) fail("The new passwords do not match.");
   // Neon Auth checks the current password itself before changing a credential.
   const { error } = await auth.changePassword({ currentPassword: current, newPassword: next, revokeOtherSessions: true });
-  if (error) fail(error.status === 400 ? "Your current password is incorrect." : (error.message ?? "Could not change the password."));
+  if (error) fail(passwordChangeMessage(error));
   await audit({ workspaceId: null, actorId: user.id, action: "auth.password_changed" });
   done("Password changed.");
 }
@@ -89,11 +90,18 @@ export async function deleteAccount(form: FormData) {
   }
   await audit({ workspaceId: null, actorId: null, action: "account.deleted", details: { connectionsRevoked: connections.length } });
   // Delete the login first: if Neon refuses, nothing of the user's data has been removed yet.
-  const { error } = await auth.deleteUser();
+  const { data, error } = await auth.deleteUser();
   if (error) fail(`Could not delete the account: ${error.message ?? "unknown error"}`);
+  if (data?.success === false) fail("Could not delete the account.");
   // The SDK trusts its cached session cookie for up to 5 minutes; drop it so the deleted account
   // cannot be "resurrected" by ensureUserWorkspace() on the next request.
   await clearAuthCookies();
-  await deleteUserData(user.id);
+  // The login is already gone, so a failure here must not become an error page: the user can no
+  // longer sign in to retry. Any data left behind is orphaned and would need a cleanup job.
+  try {
+    await deleteUserData(user.id);
+  } catch (e) {
+    console.error("[account] data cleanup failed after login deletion:", dbErrorMessage(e), user.id);
+  }
   redirect("/login?deleted=1");
 }

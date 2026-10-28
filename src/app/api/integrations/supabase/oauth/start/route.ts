@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { ensureUserWorkspace } from "@/db/bootstrap";
 import { db } from "@/db/client";
+import { dbErrorMessage } from "@/db/errors";
 import { getConnection } from "@/db/repos/inventory";
 import { oauth_states } from "@/db/schema";
 import { requireWorkspace } from "@/db/scope";
@@ -43,7 +44,8 @@ export async function GET(request: NextRequest) {
       code_verifier_ciphertext: encryptSecret(verifier, `oauth-state:${state}`),
       connection_id: connectionId,
     });
-  } catch {
+  } catch (e) {
+    console.error("[oauth] could not store the authorization state:", dbErrorMessage(e));
     return NextResponse.redirect(new URL("/providers?error=Could+not+start+authorization", origin));
   }
 
