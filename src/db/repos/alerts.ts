@@ -58,7 +58,7 @@ export async function acknowledgeAlert(s: WorkspaceScope, id: string): Promise<v
   await db
     .update(alerts)
     .set({ status: "acknowledged", acknowledged_at: new Date().toISOString(), acknowledged_by: s.userId })
-    .where(and(mine(s, id), inArray(alerts.status, ["open", "acknowledged"])));
+    .where(and(mine(s, id), eq(alerts.status, "open")));
 }
 
 export async function muteAlert(s: WorkspaceScope, id: string, untilIso: string): Promise<void> {

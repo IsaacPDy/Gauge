@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { hasTestDb, useTestDb } from "../helpers/test-db";
@@ -36,7 +35,7 @@ describe.skipIf(!hasTestDb)("workspace isolation (replaces RLS)", () => {
     a = await make();
     b = await make();
 
-    [connA] = await db.insert(t.provider_connections).values({ workspace_id: a.workspaceId, provider: "demo", label: "A", auth_method: "demo" }).returning();
+    [connA] = await db.insert(t.provider_connections).values({ workspace_id: a.workspaceId, provider: "demo", label: "A", auth_method: "demo", status: "connected", next_sync_at: null }).returning();
     await db.insert(t.provider_credentials).values({ connection_id: connA.id, workspace_id: a.workspaceId, ciphertext: "v1:secret" });
     [accA] = await db
       .insert(t.provider_accounts)
@@ -87,7 +86,10 @@ describe.skipIf(!hasTestDb)("workspace isolation (replaces RLS)", () => {
 
   afterAll(async () => {
     const { deleteUserData } = await import("@/db/bootstrap");
-    for (const id of userIds) await deleteUserData(id);
+    // Delete every user we created even if one deletion fails, then surface the first failure.
+    const results = await Promise.allSettled(userIds.map((id) => deleteUserData(id)));
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failed) throw failed.reason;
   });
 
   it("only issues a scope to a member of the workspace", async () => {
@@ -189,9 +191,11 @@ describe.skipIf(!hasTestDb)("workspace isolation (replaces RLS)", () => {
     const samples = await import("@/db/repos/samples");
     const account = await import("@/db/repos/account");
     const [ruleA] = await db.select().from(t.alert_rules).where(eq(t.alert_rules.workspace_id, a.workspaceId)).limit(1);
-    const [mappingA] = await db.select().from(t.application_resources).where(eq(t.application_resources.workspace_id, a.workspaceId)).limit(1);
+    const snapApp = await apps.createApplication(a.scope, { name: "snapshot app", description: null });
+    await apps.assignResources(a.scope, snapApp, [resA.id]);
+    const [mappingA] = await db.select().from(t.application_resources).where(eq(t.application_resources.resource_id, resA.id));
     expect(ruleA).toBeDefined();
-    expect(mappingA).toBeDefined(); // left by the "move its own resources" test above
+    expect(mappingA?.application_id).toBe(snapApp);
 
     const snapshot = async () => ({
       workspace: await db.select().from(t.workspaces).where(eq(t.workspaces.id, a.workspaceId)),
@@ -278,13 +282,29 @@ describe.skipIf(!hasTestDb)("workspace isolation (replaces RLS)", () => {
     expect(wb.name).toBe("x");
     expect(wb.owner_id).toBe(b.userId);
 
-    await alerts.updateAlertRule(a.scope, rule.id, { workspace_id: b.workspaceId } as never);
+    await alerts.updateAlertRule(a.scope, rule.id, { enabled: false, workspace_id: b.workspaceId } as never);
     const [ruleAfter] = await db.select().from(t.alert_rules).where(eq(t.alert_rules.id, rule.id));
-    expect(ruleAfter.workspace_id).toBe(a.workspaceId);
+    expect(ruleAfter.enabled).toBe(false); // the allowed key went through
+    expect(ruleAfter.workspace_id).toBe(a.workspaceId); // the smuggled one did not
 
-    await inv.patchConnection(a.scope, connA.id, { granted_scopes: ["evil"] } as never);
+    await inv.patchConnection(a.scope, connA.id, { label: "ok", granted_scopes: ["evil"] } as never);
     const [conn] = await db.select().from(t.provider_connections).where(eq(t.provider_connections.id, connA.id));
+    expect(conn.label).toBe("ok");
     expect(conn.granted_scopes).toEqual([]);
+    await inv.patchConnection(a.scope, connA.id, { label: "A" });
+
+    const quotas = await import("@/db/repos/quotas");
+    const key = { metric_key: "demo.database_size", scope_type: "resource" as const, scopeId: resA.id, unit: "bytes" };
+    const values = { limit_value: 3, overage_effect: "none", pricing_rule_id: null, notes: null, verified_at: new Date().toISOString() };
+    const smuggled = { ...values, source: "provider", workspace_id: b.workspaceId };
+    await quotas.saveUserQuota(a.scope, key, smuggled); // insert path
+    await quotas.saveUserQuota(a.scope, key, { ...smuggled, limit_value: 4 }); // update path
+    const stored = await db.select().from(t.quota_rules).where(and(eq(t.quota_rules.resource_id, resA.id), eq(t.quota_rules.created_by, a.userId)));
+    expect(stored).toHaveLength(1);
+    expect(stored[0].source).toBe("user");
+    expect(stored[0].workspace_id).toBe(a.workspaceId);
+    expect(stored[0].limit_value).toBe(4);
+    await quotas.deleteUserQuota(a.scope, stored[0].id);
   });
 
   it("does not reopen a resolved alert and treats two empty id lists as matching nothing", async () => {
@@ -318,11 +338,172 @@ describe.skipIf(!hasTestDb)("workspace isolation (replaces RLS)", () => {
     expect(await samples.loadSamples(a.scope, { from })).toHaveLength(1); // no id filter: still sees its own
   });
 
-  it("keeps stored secrets out of every repository", () => {
-    const dir = "src/db/repos";
-    for (const file of readdirSync(dir)) {
-      const source = readFileSync(`${dir}/${file}`, "utf8");
-      expect(source, file).not.toMatch(/provider_credentials|oauth_states/);
-    }
+  describe("join constraints (cross-workspace references are not followed)", () => {
+    it("getAlertDetail returns the populated relations for valid data", async () => {
+      const { db } = await import("@/db/client");
+      const t = await import("@/db/schema");
+      const alerts = await import("@/db/repos/alerts");
+      const [full] = await db
+        .insert(t.alerts)
+        .values({
+          workspace_id: a.workspaceId,
+          category: "quota_threshold",
+          severity: "warning",
+          dedupe_key: "full-k",
+          group_key: "g",
+          title: "Full",
+          message: "m",
+          connection_id: connA.id,
+          resource_id: resA.id,
+          account_id: accA.id,
+          application_id: appA.id,
+        })
+        .returning();
+      const detail = await alerts.getAlertDetail(a.scope, full.id);
+      expect(detail?.id).toBe(full.id);
+      expect(detail?.provider_connections).toEqual({ id: connA.id, label: "A", provider: "demo" });
+      expect(detail?.provider_resources).toEqual({ id: resA.id, name: "a-res", dashboard_url: null });
+      expect(detail?.provider_accounts).toEqual({ id: accA.id, name: "a-acc", dashboard_url: null });
+      expect(detail?.applications).toEqual({ id: appA.id, name: "A app" });
+    });
+
+    it("getAlertDetail ignores relations that live in another workspace", async () => {
+      const { db } = await import("@/db/client");
+      const t = await import("@/db/schema");
+      const alerts = await import("@/db/repos/alerts");
+      const [connB] = await db.insert(t.provider_connections).values({ workspace_id: b.workspaceId, provider: "demo", label: "B", auth_method: "demo", status: "connected", next_sync_at: null }).returning();
+      const [accB] = await db.insert(t.provider_accounts).values({ workspace_id: b.workspaceId, connection_id: connB.id, provider: "demo", external_id: "acc-b", name: "b-acc" }).returning();
+      const [resB] = await db.insert(t.provider_resources).values({ workspace_id: b.workspaceId, connection_id: connB.id, provider: "demo", external_id: "rb", name: "b-res", resource_type: "project" }).returning();
+      const [appB] = await db.insert(t.applications).values({ workspace_id: b.workspaceId, name: "B app" }).returning();
+      const [pointing] = await db
+        .insert(t.alerts)
+        .values({
+          workspace_id: a.workspaceId,
+          category: "quota_threshold",
+          severity: "warning",
+          dedupe_key: "cross-k",
+          group_key: "g",
+          title: "Points at B",
+          message: "m",
+          connection_id: connB.id,
+          resource_id: resB.id,
+          account_id: accB.id,
+          application_id: appB.id,
+        })
+        .returning();
+      const detail = await alerts.getAlertDetail(a.scope, pointing.id);
+      expect(detail?.id).toBe(pointing.id);
+      expect(detail?.provider_connections).toBeNull();
+      expect(detail?.provider_resources).toBeNull();
+      expect(detail?.provider_accounts).toBeNull();
+      expect(detail?.applications).toBeNull();
+    });
+
+    it("listInbox does not follow an alert in another workspace", async () => {
+      const { db } = await import("@/db/client");
+      const t = await import("@/db/schema");
+      const alerts = await import("@/db/repos/alerts");
+      const [alertB] = await db
+        .insert(t.alerts)
+        .values({ workspace_id: b.workspaceId, category: "quota_threshold", severity: "warning", dedupe_key: "kb", group_key: "g", title: "B alert", message: "m" })
+        .returning();
+      const [foreign] = await db
+        .insert(t.notification_deliveries)
+        .values({ workspace_id: a.workspaceId, alert_id: alertB.id, channel: "in_app", status: "sent" })
+        .returning();
+      const inbox = await alerts.listInbox(a.scope, 50);
+      const row = inbox.find((r) => r.id === foreign.id);
+      expect(row).toBeDefined();
+      expect(row?.alerts).toBeNull();
+      expect(inbox.find((r) => r.id === deliveryA.id)?.alerts?.id).toBe(alertA.id); // control
+    });
+
+    it("getScopePlan does not read the plan of an account in another workspace", async () => {
+      const { db } = await import("@/db/client");
+      const t = await import("@/db/schema");
+      const inv = await import("@/db/repos/inventory");
+      const [accB] = await db.select().from(t.provider_accounts).where(eq(t.provider_accounts.workspace_id, b.workspaceId)).limit(1);
+      await db.update(t.provider_accounts).set({ plan: "enterprise" }).where(eq(t.provider_accounts.id, accB.id));
+      await db.update(t.provider_accounts).set({ plan: "pro" }).where(eq(t.provider_accounts.id, accA.id));
+      const [linked] = await db
+        .insert(t.provider_resources)
+        .values({ workspace_id: a.workspaceId, connection_id: connA.id, account_id: accB.id, provider: "demo", external_id: "linked-b", name: "linked-b", resource_type: "project" })
+        .returning();
+      expect(await inv.getScopePlan(a.scope, "resource", linked.id)).toEqual({ plan: null });
+      expect(await inv.getScopePlan(a.scope, "resource", resA.id)).toEqual({ plan: "pro" }); // control
+    });
+
+    it("listQuotasWithEvaluations ignores an evaluation stamped with another workspace", async () => {
+      const { db } = await import("@/db/client");
+      const t = await import("@/db/schema");
+      const quotas = await import("@/db/repos/quotas");
+      await db.insert(t.quota_evaluations).values({ quota_rule_id: providerQuotaA.id, workspace_id: b.workspaceId, data_state: "fresh" });
+      const foreign = (await quotas.listQuotasWithEvaluations(a.scope)).find((q) => q.id === providerQuotaA.id);
+      expect(foreign).toBeDefined();
+      expect(foreign?.quota_evaluations).toBeNull();
+
+      await db.update(t.quota_evaluations).set({ workspace_id: a.workspaceId }).where(eq(t.quota_evaluations.quota_rule_id, providerQuotaA.id));
+      const own = (await quotas.listQuotasWithEvaluations(a.scope)).find((q) => q.id === providerQuotaA.id);
+      expect(own?.quota_evaluations?.quota_rule_id).toBe(providerQuotaA.id); // control
+    });
+  });
+
+  describe("alert status guards", () => {
+    const fresh = async (key: string) => {
+      const { db } = await import("@/db/client");
+      const t = await import("@/db/schema");
+      const [row] = await db
+        .insert(t.alerts)
+        .values({ workspace_id: a.workspaceId, category: "quota_threshold", severity: "warning", dedupe_key: key, group_key: "g", title: key, message: "m" })
+        .returning();
+      const read = async () => (await db.select().from(t.alerts).where(eq(t.alerts.id, row.id)))[0];
+      return { id: row.id, read };
+    };
+
+    it("walks open -> acknowledged -> muted -> open", async () => {
+      const alerts = await import("@/db/repos/alerts");
+      const { id, read } = await fresh("walk");
+      await alerts.acknowledgeAlert(a.scope, id);
+      let row = await read();
+      expect(row.status).toBe("acknowledged");
+      expect(row.acknowledged_by).toBe(a.userId);
+
+      const first = new Date(Date.now() + 3_600_000).toISOString();
+      await alerts.muteAlert(a.scope, id, first);
+      row = await read();
+      expect(row.status).toBe("muted");
+      expect(Date.parse(row.muted_until!)).toBe(Date.parse(first));
+
+      const later = new Date(Date.now() + 7_200_000).toISOString();
+      await alerts.muteAlert(a.scope, id, later); // re-mute extends
+      row = await read();
+      expect(row.status).toBe("muted");
+      expect(Date.parse(row.muted_until!)).toBe(Date.parse(later));
+
+      await alerts.unmuteAlert(a.scope, id);
+      row = await read();
+      expect(row.status).toBe("open");
+      expect(row.muted_until).toBeNull();
+    });
+
+    it("unmute only applies to muted alerts, and acknowledge only to open ones", async () => {
+      const alerts = await import("@/db/repos/alerts");
+      const open = await fresh("guard-open");
+      await alerts.unmuteAlert(a.scope, open.id);
+      expect((await open.read()).status).toBe("open");
+
+      const acked = await fresh("guard-acked");
+      await alerts.acknowledgeAlert(a.scope, acked.id);
+      const stamp = (await acked.read()).acknowledged_at;
+      await alerts.acknowledgeAlert(a.scope, acked.id); // second ack: no-op
+      expect((await acked.read()).acknowledged_at).toBe(stamp);
+      await alerts.unmuteAlert(a.scope, acked.id);
+      expect((await acked.read()).status).toBe("acknowledged");
+
+      const muted = await fresh("guard-muted");
+      await alerts.muteAlert(a.scope, muted.id, new Date(Date.now() + 3_600_000).toISOString());
+      await alerts.acknowledgeAlert(a.scope, muted.id);
+      expect((await muted.read()).status).toBe("muted");
+    });
   });
 });

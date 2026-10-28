@@ -1558,6 +1558,8 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ### Task 6: Workspace scope, repositories and tenant-isolation tests
 
+> Amended during execution (commits edc13d0, 008863e and the follow-up): the repositories now constrain joins to the workspace, whitelist patch keys with src/db/pick.ts, narrow patchConnection's type and add tests/db/boundaries.test.ts. The code in src/db is authoritative where it differs from the blocks below.
+
 **Files:**
 - Create: `src/db/scope.ts`, `src/db/claims.ts`, `src/db/alert-relations.ts`
 - Create: `src/db/repos/inventory.ts`, `applications.ts`, `quotas.ts`, `alerts.ts`, `samples.ts`, `account.ts`

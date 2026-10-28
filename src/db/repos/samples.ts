@@ -8,7 +8,8 @@ import type { WorkspaceScope } from "../scope";
  * - resourceIds + accountIds: samples for either set
  * - resourceIds only: resource-level samples
  * - accountIds only: account-level samples (no resource)
- * An empty id list matches nothing, as before.
+ * An empty id list matches nothing. That includes both lists being given and both empty, which
+ * the old PostgREST code treated as "no filter"; here it returns no rows.
  */
 export function loadSamples(
   s: WorkspaceScope,

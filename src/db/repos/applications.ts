@@ -15,7 +15,7 @@ export async function createApplication(s: WorkspaceScope, v: { name: string; de
 export async function updateApplication(s: WorkspaceScope, id: string, v: { name: string; description: string | null }): Promise<void> {
   await db
     .update(applications)
-    .set(v)
+    .set({ name: v.name, description: v.description })
     .where(and(eq(applications.id, id), eq(applications.workspace_id, s.workspaceId)));
 }
 
@@ -29,13 +29,14 @@ export async function deleteApplication(s: WorkspaceScope, id: string): Promise<
  */
 export async function assignResources(s: WorkspaceScope, applicationId: string, resourceIds: string[]): Promise<void> {
   if (!resourceIds.length) return;
+  const ids = [...new Set(resourceIds)];
   await db.transaction(async (tx) => {
     await tx
       .delete(application_resources)
-      .where(and(inArray(application_resources.resource_id, resourceIds), eq(application_resources.workspace_id, s.workspaceId)));
+      .where(and(inArray(application_resources.resource_id, ids), eq(application_resources.workspace_id, s.workspaceId)));
     await tx
       .insert(application_resources)
-      .values(resourceIds.map((resource_id) => ({ application_id: applicationId, resource_id, workspace_id: s.workspaceId })));
+      .values(ids.map((resource_id) => ({ application_id: applicationId, resource_id, workspace_id: s.workspaceId })));
   });
 }
 
