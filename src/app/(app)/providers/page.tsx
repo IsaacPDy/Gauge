@@ -20,7 +20,7 @@ export default async function ProvidersPage({ searchParams }: PageProps<"/provid
     <>
       <PageHeader
         title="Providers"
-        description="Connect cloud accounts with read-only access. CloudWatch discovers what you can see and collects usage on a schedule."
+        description="Connect cloud accounts with read-only access. Limit Gauge discovers what you can see and collects usage on a schedule."
         actions={<LinkButton href="/providers/resources">All resources</LinkButton>}
       />
       <Flash ok={sp.ok} error={sp.error} />

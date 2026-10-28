@@ -20,7 +20,7 @@ export const metadata = { title: "Connection" };
 const FAILURE_HELP: Record<string, string> = {
   reauth_required: "The provider rejected the stored credentials (expired or revoked). Collection is paused until you reauthorize below.",
   permission_insufficient: "The credentials work but lack a required read permission. Reconnect with the permissions listed below.",
-  error: "Repeated failures contacting the provider. CloudWatch keeps retrying with backoff; existing data is kept and never treated as zero.",
+  error: "Repeated failures contacting the provider. Limit Gauge keeps retrying with backoff; existing data is kept and never treated as zero.",
   disconnected: "This connection is disconnected. Its credentials were deleted and no data is collected. Historical data remains visible.",
 };
 
@@ -111,7 +111,7 @@ export default async function ConnectionPage({ params, searchParams }: PageProps
         <Card className="mb-6 border-accent/40">
           <CardHeader
             title="Choose resources to monitor"
-            description="CloudWatch only collects usage for the resources you select. You can change this at any time."
+            description="Limit Gauge only collects usage for the resources you select. You can change this at any time."
           />
           <form action={saveMonitoring}>
             <input type="hidden" name="connectionId" value={conn.id} />

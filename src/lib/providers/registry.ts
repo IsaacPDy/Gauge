@@ -91,7 +91,7 @@ export const PROVIDER_CATALOG: CatalogEntry[] = [
     available: false,
     description: "Account balance, billing history, Droplet and App Platform usage.",
   },
-  { id: "aws", name: "AWS", category: "cloud", available: false, description: "Cost Explorer spend, budgets and CloudWatch metrics." },
+  { id: "aws", name: "AWS", category: "cloud", available: false, description: "Cost Explorer spend, budgets and Limit Gauge metrics." },
   {
     id: "gcp",
     name: "Google Cloud",

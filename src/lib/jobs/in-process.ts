@@ -1,7 +1,7 @@
 import { runSchedulerTick } from "./scheduler";
 import { ensureReferenceData } from "./reference";
 
-const KEY = Symbol.for("cloudwatch.scheduler");
+const KEY = Symbol.for("limitgauge.scheduler");
 type Global = typeof globalThis & { [KEY]?: NodeJS.Timeout };
 
 /** Development convenience: run the scheduler inside the Next.js server process. */

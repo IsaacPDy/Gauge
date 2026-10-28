@@ -143,7 +143,7 @@ export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
         {header}
         {picker}
         <Notice tone="neutral" title={`${metric.name} is not available from ${PROVIDER_NAMES[metric.provider]}`}>
-          {metric.unsupportedReason} CloudWatch shows this as unsupported instead of guessing or showing zero.
+          {metric.unsupportedReason} Limit Gauge shows this as unsupported instead of guessing or showing zero.
         </Notice>
       </>
     );

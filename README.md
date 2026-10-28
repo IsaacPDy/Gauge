@@ -1,10 +1,10 @@
-# CloudWatch — unified cloud usage & cost monitoring
+# Limit Gauge — unified cloud usage & cost monitoring
 
-CloudWatch connects to your cloud accounts with read-only access, discovers your projects, collects usage on a schedule, compares it against provider-reported or user-configured limits, forecasts the end of the billing cycle, and warns you (in-app and by email) before you hit a limit or an unexpected bill.
+Limit Gauge connects to your cloud accounts with read-only access, discovers your projects, collects usage on a schedule, compares it against provider-reported or user-configured limits, forecasts the end of the billing cycle, and warns you (in-app and by email) before you hit a limit or an unexpected bill.
 
 It implements checkpoints 1–6 of the PRD (`writing-block.md`): the full MVP definition of done, plus forecasting and cost estimates. Supabase is the first real integration. A clearly labelled **Demo provider** (development only) generates sample data so you can explore the whole product without credentials.
 
-> CloudWatch monitors and forecasts. It never shuts down services, changes plans or caps spending, and every estimate is labelled as one.
+> Limit Gauge monitors and forecasts. It never shuts down services, changes plans or caps spending, and every estimate is labelled as one.
 
 ## Quick start (local)
 

@@ -19,7 +19,7 @@ export const metadata = { title: "Home" };
 
 const STEPS = [
   { title: "Connect a provider", body: "Authorize read-only access to Supabase.", href: "/providers" },
-  { title: "Choose resources", body: "Pick the projects CloudWatch should monitor.", href: "/providers/resources" },
+  { title: "Choose resources", body: "Pick the projects Limit Gauge should monitor.", href: "/providers/resources" },
   { title: "Group into applications", body: "Organize resources by the product they serve.", href: "/applications" },
   { title: "Confirm limits", body: "Load provider limits or set your own thresholds.", href: "/usage/quotas" },
 ];
@@ -33,7 +33,7 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
   if (inv.connections.length === 0) {
     return (
       <>
-        <PageHeader title="Welcome to CloudWatch" description="Know what your applications consume and get early warnings before limits or unexpected costs." />
+        <PageHeader title="Welcome to Limit Gauge" description="Know what your applications consume and get early warnings before limits or unexpected costs." />
         <Flash ok={sp.ok} error={sp.error} />
         <Card>
           <CardHeader title="Get started" description="Four steps to your first dashboard." />
@@ -54,7 +54,7 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
           </CardBody>
         </Card>
         <p className="mt-4 text-xs text-muted">
-          CloudWatch monitors and forecasts. It never shuts down services or changes plans, and its alerts are not spending caps.
+          Limit Gauge monitors and forecasts. It never shuts down services or changes plans, and its alerts are not spending caps.
         </p>
       </>
     );

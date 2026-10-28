@@ -1,6 +1,6 @@
 # Product Requirements Document
-# CloudWatch — Unified Cloud Usage & Cost Monitoring
-**Working name:** CloudWatch (placeholder; subject to trademark and naming review)  
+# Limit Gauge — Unified Cloud Usage & Cost Monitoring
+**Working name:** Limit Gauge (placeholder; subject to trademark and naming review)  
 **Version:** 1.0  
 **Date:** October 8, 2026  
 **Status:** Initial Product Specification  
@@ -11,11 +11,11 @@
 
 ## 1. Executive Summary
 
-CloudWatch is a unified cloud usage monitoring platform that allows developers to connect their cloud service accounts, discover their projects, track resource consumption, monitor free-tier and paid-plan allowances, and receive notifications before they are projected to exceed those allowances or incur unexpected expenses.
+Limit Gauge is a unified cloud usage monitoring platform that allows developers to connect their cloud service accounts, discover their projects, track resource consumption, monitor free-tier and paid-plan allowances, and receive notifications before they are projected to exceed those allowances or incur unexpected expenses.
 
 Developers frequently use multiple cloud providers across several applications. Monitoring consumption requires visiting each provider's dashboard, understanding different pricing structures, and manually tracking usage.
 
-CloudWatch consolidates supported information into one dashboard.
+Limit Gauge consolidates supported information into one dashboard.
 
 ### Core Value Proposition
 
@@ -107,7 +107,7 @@ Operates multiple production applications across different providers.
 The application uses the following organizational hierarchy:
 
 **Workspace**
-- Represents an individual user's or team's CloudWatch environment.
+- Represents an individual user's or team's Limit Gauge environment.
 - Contains all connected cloud providers, monitored resources, applications, and notification settings.
 
 **Provider Connection**
@@ -140,7 +140,7 @@ The application uses the following organizational hierarchy:
 
 An application and a provider project are not necessarily the same entity.
 
-CloudWatch must preserve the provider's actual resource hierarchy separately from the user's logical application grouping.
+Limit Gauge must preserve the provider's actual resource hierarchy separately from the user's logical application grouping.
 
 For example, a single application may use Supabase for its database and Cloudflare for hosting.
 
@@ -254,7 +254,7 @@ Users must be able to:
 - Reassign resources between applications.
 - Manually initiate resource discovery.
 
-**Important:** CloudWatch must not claim to automatically discover dependencies between providers unless those relationships can be reliably established.
+**Important:** Limit Gauge must not claim to automatically discover dependencies between providers unless those relationships can be reliably established.
 
 **Acceptance Criteria**
 - Resource discovery imports available provider resources.
@@ -606,7 +606,7 @@ An empty-state onboarding experience should direct new users to connect their fi
 3. User opens Providers.
 4. User selects Supabase.
 5. User authorizes access.
-6. CloudWatch validates the connection.
+6. Limit Gauge validates the connection.
 7. Supported organizations and projects are discovered.
 8. User selects resources to monitor.
 9. User groups resources into logical applications.

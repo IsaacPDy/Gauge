@@ -80,7 +80,7 @@ export default async function AlertPage({ params, searchParams }: PageProps<"/al
             </Notice>
           ) : null}
           <p className="text-xs text-muted">
-            CloudWatch alerts are monitoring notices, not spending caps or provider controls. Estimates can differ from your invoice,
+            Limit Gauge alerts are monitoring notices, not spending caps or provider controls. Estimates can differ from your invoice,
             which is authoritative.
           </p>
         </div>

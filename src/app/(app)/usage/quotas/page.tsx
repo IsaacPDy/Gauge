@@ -86,7 +86,7 @@ export default async function QuotasPage({ searchParams }: PageProps<"/usage/quo
     <>
       <PageHeader
         title="Limits & quotas"
-        description="Provider-reported limits, limits you configured, and metrics whose limit is unknown. CloudWatch never substitutes an assumed value for an unknown limit."
+        description="Provider-reported limits, limits you configured, and metrics whose limit is unknown. Limit Gauge never substitutes an assumed value for an unknown limit."
         actions={<LinkButton href="/usage">Usage explorer</LinkButton>}
       />
       <Flash ok={sp.ok} error={sp.error} />

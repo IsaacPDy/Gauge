@@ -47,7 +47,7 @@ function describeProviderError(e: unknown): string {
     case "auth_expired":
       return "The provider rejected these credentials. Check that the token is correct and has not been revoked.";
     case "permission_denied":
-      return "The credentials are valid but lack the read permissions CloudWatch needs.";
+      return "The credentials are valid but lack the read permissions Limit Gauge needs.";
     case "rate_limited":
       return "The provider is rate limiting requests. Wait a minute and try again.";
     case "provider_unavailable":

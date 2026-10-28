@@ -14,7 +14,7 @@ export default async function ConnectSupabasePage({ searchParams }: PageProps<"/
     <>
       <PageHeader
         title="Connect Supabase"
-        description="CloudWatch reads organizations, projects and usage through the Supabase Management API. It never asks for database passwords or service-role keys, and never changes your projects."
+        description="Limit Gauge reads organizations, projects and usage through the Supabase Management API. It never asks for database passwords or service-role keys, and never changes your projects."
       />
       <Flash error={sp.error} />
       <div className="grid gap-4 lg:grid-cols-2">
@@ -47,7 +47,7 @@ export default async function ConnectSupabasePage({ searchParams }: PageProps<"/
           <CardHeader title={<span className="flex items-center gap-1.5"><KeyRound className="size-4 text-muted" aria-hidden /> Personal access token</span>} description="Works without an OAuth app. Create one under Account → Access Tokens in Supabase." />
           <CardBody className="space-y-4">
             <Notice tone="warn">
-              Supabase personal access tokens are not scoped: they carry your full account access. CloudWatch only sends read
+              Supabase personal access tokens are not scoped: they carry your full account access. Limit Gauge only sends read
               requests, encrypts the token at rest and never shows it again, but prefer OAuth when possible. Revoke the token in
               Supabase when you disconnect.
             </Notice>

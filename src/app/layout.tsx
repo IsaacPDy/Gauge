@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "CloudWatch", template: "%s · CloudWatch" },
+  title: { default: "Limit Gauge", template: "%s · Limit Gauge" },
   description: "Monitor cloud usage, quotas and projected overages across providers.",
 };
 

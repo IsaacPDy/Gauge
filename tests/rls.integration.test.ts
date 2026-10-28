@@ -21,7 +21,7 @@ describe.skipIf(!reachable)("workspace isolation (RLS)", () => {
   let resourceA = "";
 
   async function makeUser() {
-    const email = `rls-${randomUUID()}@cloudwatch.test`;
+    const email = `rls-${randomUUID()}@limitgauge.test`;
     const password = `T-${randomUUID()}`;
     const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
     if (error) throw error;

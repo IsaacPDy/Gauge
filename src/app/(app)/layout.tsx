@@ -27,7 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </a>
         <aside className="border-b border-border bg-surface md:sticky md:top-0 md:h-dvh md:w-56 md:shrink-0 md:border-r md:border-b-0">
           <div className="flex items-center justify-between px-4 py-3 md:py-4">
-            <Link href="/home" aria-label="CloudWatch home">
+            <Link href="/home" aria-label="Limit Gauge home">
               <Logo />
             </Link>
             <div className="flex items-center gap-2 md:hidden">

@@ -169,7 +169,7 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
           <CardHeader title="Shared organization quotas" description="Billed at organization level and shared with other projects." />
           <CardBody className="space-y-3">
             <Notice tone="neutral">
-              These allowances cover every project in the organization. CloudWatch does not attribute shared usage or charges to this
+              These allowances cover every project in the organization. Limit Gauge does not attribute shared usage or charges to this
               application.
             </Notice>
             {sharedQuotas.length === 0 ? <p className="text-sm text-muted">None configured.</p> : null}
