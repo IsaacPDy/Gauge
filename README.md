@@ -8,9 +8,7 @@ It implements checkpoints 1–6 of the PRD (`writing-block.md`): the full MVP de
 
 ## Quick start (local)
 
-Prerequisites: Node 20.9+ and a free Neon account (https://neon.com).
-
-Create a Neon project with a `dev` branch, enable **Auth** on that branch, and put its connection strings and Auth URL in `.env.local` (see `.env.example`). Then:
+Prerequisites: Node 20.12+ and a free Neon account (https://neon.com). Set up Neon first (see [Neon setup](#neon-setup)), then:
 
 ```bash
 npm install
@@ -19,6 +17,8 @@ npm install
 ```bash
 npm run setup:env
 ```
+
+`setup:env` creates `.env.local` and generates the secrets. Open it and fill in the values from the Neon console (`DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `NEON_AUTH_BASE_URL`, and `NEON_BRANCH=dev`). Then:
 
 ```bash
 npm run db:migrate
@@ -35,7 +35,33 @@ Then open http://localhost:3100. The app uses port 3100 so it does not collide w
 3. Choose the resources to monitor. Usage history appears within seconds.
 4. Explore **Home**, **Usage**, **Limits & quotas** and **Alerts**. In development alert emails are printed to the server log (`EMAIL_TRANSPORT=console`).
 
-`setup:env` creates `.env.local` from `.env.example` and generates the credential encryption key, cron secret and auth cookie secret. It keeps existing values, so it is safe to re-run. In development, Neon Auth sends its verification and password-reset emails through Neon's shared sender.
+`setup:env` copies the keys from `.env.example` and generates the credential encryption key, cron secret and auth cookie secret. It keeps existing values, so it is safe to re-run.
+
+### Neon setup
+
+1. In the Neon console create a project and a branch named `dev`.
+2. On that branch open **Auth** and enable it.
+3. Copy these values into `.env.local`:
+
+| Variable | Where it comes from |
+|---|---|
+| `DATABASE_URL` | **Connect** with connection pooling **on** (the pooled string) |
+| `DATABASE_URL_UNPOOLED` | **Connect** with connection pooling **off** (the direct string). Migrations and `db:reset` use it |
+| `NEON_AUTH_BASE_URL` | **Auth → Configuration** (the Auth URL) |
+| `NEON_BRANCH` | A label you choose. `db:reset` only runs when it is `dev` |
+
+4. In **Auth** add `http://localhost:3100` as a trusted origin. Leave **Allow Localhost** on for development.
+5. In development, Neon Auth sends verification and password-reset emails through Neon's shared sender. That sender is meant for development only.
+
+Safari does not store the auth cookies over plain HTTP on localhost. Run `npm run dev -- --experimental-https` and open the https address it prints.
+
+### Changing the schema
+
+1. Add a new `db/migrations/NNNN_name.sql` (never edit an applied migration).
+2. Update `src/db/schema.ts` to match.
+3. Run `npm run db:migrate`.
+
+The schema parity test (`tests/db/schema-parity.test.ts`) fails when the Drizzle schema and the migrated database drift apart.
 
 ### Scripts
 
@@ -43,10 +69,10 @@ Then open http://localhost:3100. The app uses port 3100 so it does not collide w
 |---|---|
 | `npm run dev` | Next.js dev server on :3100. With `RUN_SCHEDULER_IN_PROCESS=true` it also runs collection and alert delivery every 60 s |
 | `npm run worker` / `worker:once` | Standalone scheduler loop / single pass (for production-style setups) |
-| `npm test` | Unit tests, plus database integration tests when `DATABASE_URL_TEST` is set |
+| `npm test` | Unit tests, plus database integration tests when `DATABASE_URL_TEST` is set (see [Tests](#tests)) |
 | `npm run typecheck` | TypeScript check |
 | `npm run db:migrate` | Apply `db/migrations/*.sql` to the branch in `DATABASE_URL_UNPOOLED` |
-| `npm run db:reset -- --yes` | Wipe and re-create the app schema on the `dev` branch (refuses unless `NEON_BRANCH=dev`) |
+| `npm run db:reset -- --yes --host=<host>` | Wipe and re-create the app schema on the branch in `DATABASE_URL_UNPOOLED`. Refuses unless `NEON_BRANCH=dev`, `--yes` is given and `--host` equals that URL's host. On a mismatch it prints the actual host and the command to retype |
 
 ## Architecture
 
@@ -112,9 +138,15 @@ Verified on 2026-10-09 against the Management API OpenAPI spec and the "Manage y
 
 ## Deploying
 
-1. **Database and auth.** In Neon, use the `main` branch for production. Apply the schema with `DATABASE_URL_UNPOOLED=<main direct url> npm run db:migrate`. In the branch's Auth settings add your production domain as a trusted domain, set up a custom email provider, and enable email verification (see Neon's auth production checklist).
-2. **App.** Deploy to Vercel or any Node host, with these env vars: `DATABASE_URL`, `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, `APP_URL`, `CREDENTIALS_ENCRYPTION_KEY`, `CRON_SECRET`, the email settings (`EMAIL_TRANSPORT=resend` + `RESEND_API_KEY`, or SMTP), and optionally the Supabase OAuth credentials. Set `ENABLE_DEMO_PROVIDER=false` and `RUN_SCHEDULER_IN_PROCESS=false`.
+1. **Database and auth.** In Neon, use the `main` branch for production. Apply the schema by hand, before deploying code that needs it: `DATABASE_URL_UNPOOLED=<main direct url> npm run db:migrate`. In the branch's Auth settings add your production domain as a trusted origin, set up a custom email provider, and enable email verification (see Neon's auth production checklist).
+2. **App.** Deploy to Vercel or any Node host, with these env vars: `DATABASE_URL` (the **pooled** URL), `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, `APP_URL`, `CREDENTIALS_ENCRYPTION_KEY`, `CRON_SECRET`, the email settings (`EMAIL_TRANSPORT=resend` + `RESEND_API_KEY`, or SMTP), and optionally the Supabase OAuth credentials. Set `ENABLE_DEMO_PROVIDER=false` and `RUN_SCHEDULER_IN_PROCESS=false`.
+   - `NEON_AUTH_BASE_URL` and `NEON_AUTH_COOKIE_SECRET` (32+ characters) are needed at **build** time too: the Auth SDK validates them when it is imported.
+   - `APP_URL` is mandatory in production; the app throws without it.
+   - Do not enable Neon's Data API. The tables have no row-level security; authorization lives in the app's workspace scopes (`src/db/scope.ts`).
+   - `SUPABASE_MANAGEMENT_API_URL` is an optional override for the Supabase adapter's API base URL (default `https://api.supabase.com`).
 3. **Scheduling.** `vercel.json` calls `/api/cron/tick` every 15 minutes, and Vercel sends `Authorization: Bearer $CRON_SECRET` automatically. Vercel's Hobby plan only allows daily crons. Elsewhere, run `npm run worker` as a separate process, or have any scheduler call the endpoint with the bearer token. Each connection's collection interval defaults to 6 hours.
+
+**Session caching.** The Auth SDK trusts its session cache cookie for about 5 minutes. After you delete an account or revoke a session, another device may keep working for up to that long.
 
 ## Tests
 
@@ -124,6 +156,8 @@ Verified on 2026-10-09 against the Management API OpenAPI spec and the "Manage y
 - **Supabase adapter**: mocked API covering parsing, per-metric failures, auth aborts, paused projects, retries and rate limits.
 - **Cost simulator**: price catalog structure, URL encoding and presets, stack routing, the workload model, pricing and unit conversions, compute choice and the cache verdict, events, and every preset against the real catalog.
 - **Database** (needs `DATABASE_URL_TEST`): schema parity with the migrations, workspace bootstrap, and workspace isolation of the repositories. They run on the Neon branch in `DATABASE_URL_TEST`, which may be the same as the dev branch; they create and delete their own random test users and leave other data alone.
+
+While the tests run, do not run `npm run worker` or set `RUN_SCHEDULER_IN_PROCESS=true`: the scheduler would process the test data. If the dev branch holds data you care about, point `DATABASE_URL_TEST` at a separate Neon branch.
 
 ## Not yet built (later checkpoints)
 
