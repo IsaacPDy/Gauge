@@ -11,7 +11,7 @@ export const listAlerts = (s: WorkspaceScope, opts: { statuses?: string[]; limit
     .select()
     .from(alerts)
     .where(and(eq(alerts.workspace_id, s.workspaceId), opts.statuses ? inArray(alerts.status, opts.statuses) : undefined))
-    .orderBy(desc(alerts.created_at))
+    .orderBy(desc(alerts.created_at), desc(alerts.id))
     .limit(opts.limit);
 
 export async function getAlert(s: WorkspaceScope, id: string): Promise<Row<"alerts"> | null> {

@@ -10,6 +10,7 @@ import { billingCycle, DAY_MS, startOfUtcDay, type Cycle } from "../engine/time"
 import { currentUsage, dailySeries, type CurrentUsage, type DailyValue, type UsagePoint } from "../engine/usage";
 import { getAdapter, getMetric, PROVIDER_NAMES } from "../providers/registry";
 import type { MetricDefinition } from "../types";
+import { sortByCreated, sortByName } from "./sort";
 
 // Read models for pages. Everything here reads stored data for the caller's workspace
 // through repositories; no provider API is called while rendering.
@@ -31,13 +32,18 @@ export interface Inventory {
 }
 
 export async function loadInventory(scope: WorkspaceScope): Promise<Inventory> {
-  const [conns, accs, resources, apps, mappings] = await Promise.all([
+  const [connRows, accRows, resourceRows, appRows, mappings] = await Promise.all([
     listConnections(scope),
     listAccounts(scope),
     listResources(scope),
     listApplications(scope),
     listApplicationMappings(scope),
   ]);
+  // Ordered in code: the database collation is bytewise (see ./sort).
+  const conns = sortByCreated(connRows);
+  const accs = sortByName(accRows);
+  const resources = sortByName(resourceRows);
+  const apps = sortByName(appRows);
   const appById = new Map(apps.map((a) => [a.id, a]));
   const appByResource = new Map<string, ApplicationRow>();
   for (const m of mappings) {

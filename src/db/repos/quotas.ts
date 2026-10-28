@@ -12,7 +12,7 @@ export async function listQuotasWithEvaluations(s: WorkspaceScope) {
     .from(quota_rules)
     .leftJoin(quota_evaluations, and(eq(quota_evaluations.quota_rule_id, quota_rules.id), eq(quota_evaluations.workspace_id, quota_rules.workspace_id)))
     .where(eq(quota_rules.workspace_id, s.workspaceId))
-    .orderBy(asc(quota_rules.created_at));
+    .orderBy(asc(quota_rules.created_at), asc(quota_rules.id));
   return rows.map((r) => ({ ...r.quota, quota_evaluations: r.evaluation }));
 }
 
