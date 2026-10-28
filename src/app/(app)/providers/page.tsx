@@ -13,8 +13,8 @@ export const metadata = { title: "Providers" };
 
 export default async function ProvidersPage({ searchParams }: PageProps<"/providers">) {
   const sp = await searchParams;
-  const { supabase } = await getSession();
-  const inv = await loadInventory(supabase);
+  const { scope } = await getSession();
+  const inv = await loadInventory(scope);
 
   return (
     <>

@@ -5,6 +5,7 @@ import { SubmitButton } from "@/components/form-controls";
 import { AlertStatusBadge, CATEGORY_LABEL, SeverityBadge } from "@/components/status";
 import { TimeAgo } from "@/components/time";
 import { Card, EmptyState, Flash, LinkButton, PageHeader } from "@/components/ui";
+import { listAlerts, listInbox } from "@/db/repos/alerts";
 import { getSession } from "@/lib/session";
 import { SEVERITY_RANK, type Severity } from "@/lib/types";
 import { markAllRead, openNotification } from "./actions";
@@ -21,7 +22,7 @@ const TABS = [
 export default async function AlertsPage({ searchParams }: PageProps<"/alerts">) {
   const sp = await searchParams;
   const tab = TABS.some((t) => t.id === sp.tab) ? (sp.tab as (typeof TABS)[number]["id"]) : "active";
-  const { supabase } = await getSession();
+  const { scope } = await getSession();
   const back = `/alerts?tab=${tab}`;
 
   const tabs = (
@@ -44,14 +45,7 @@ export default async function AlertsPage({ searchParams }: PageProps<"/alerts">)
 
   let body: React.ReactNode;
   if (tab === "inbox") {
-    const { data } = await supabase
-      .from("notification_deliveries")
-      .select("id, created_at, read_at, alerts(id, title, severity, category, status)")
-      .eq("channel", "in_app")
-      .eq("status", "sent")
-      .order("created_at", { ascending: false })
-      .limit(100);
-    const items = data ?? [];
+    const items = await listInbox(scope, 100);
     body = (
       <Card>
         <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
@@ -90,10 +84,12 @@ export default async function AlertsPage({ searchParams }: PageProps<"/alerts">)
       </Card>
     );
   } else {
-    const query = supabase.from("alerts").select("*").order("created_at", { ascending: false }).limit(tab === "history" ? 200 : 100);
-    const { data } = tab === "active" ? await query.in("status", ["open", "acknowledged", "muted"]) : await query;
+    const data = await listAlerts(scope, {
+      statuses: tab === "active" ? ["open", "acknowledged", "muted"] : undefined,
+      limit: tab === "history" ? 200 : 100,
+    });
     // Active view: most severe first; history stays chronological.
-    const alerts = [...(data ?? [])].sort((a, b) =>
+    const alerts = [...data].sort((a, b) =>
       tab === "active" ? SEVERITY_RANK[b.severity as Severity] - SEVERITY_RANK[a.severity as Severity] || b.created_at.localeCompare(a.created_at) : 0,
     );
     body = (

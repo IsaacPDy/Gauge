@@ -52,10 +52,10 @@ function scopeOptions(inv: Inventory, metric: MetricDefinition) {
 
 export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
   const sp = await searchParams;
-  const { supabase, workspace } = await getSession();
+  const { scope: wsScope, workspace } = await getSession();
   const { display } = await getDisplay();
-  const inv = await loadInventory(supabase);
-  const quotas = await loadQuotaViews(supabase, inv);
+  const inv = await loadInventory(wsScope);
+  const quotas = await loadQuotaViews(wsScope, inv);
   const monitored = inv.resources.filter((r) => r.is_monitored && r.status === "active");
 
   if (monitored.length === 0) {
@@ -174,7 +174,7 @@ export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
 
   const from = new Date(Math.min(startOfUtcDay(now).getTime() - (range - 1) * DAY_MS, cycle.start.getTime()));
   const rows = await loadSamples(
-    supabase,
+    wsScope,
     metric.scopeLevel === "account" ? { metricKeys: [metric.key], accountIds: [scopeId], from } : { metricKeys: [metric.key], resourceIds: scopeIds, from },
   );
   const points = toPoints(rows);

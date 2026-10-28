@@ -4,6 +4,7 @@ import { UsageTrendChart } from "@/components/charts";
 import { ConnectionStatusBadge, RiskLabel, SeverityBadge, SourceBadge, UsageBar } from "@/components/status";
 import { formatDate, TimeAgo } from "@/components/time";
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Flash, LinkButton, PageHeader, Select, StatCard, Table, Td, Th } from "@/components/ui";
+import { listAlerts, listFutureCosts } from "@/db/repos/alerts";
 import { isAtRisk, isSyncing, loadInventory, loadQuotaViews, loadSamples, riskScore, seriesFor } from "@/lib/data/views";
 import { totalsByCurrency } from "@/lib/engine/cost";
 import { connectionHealth } from "@/lib/engine/health";
@@ -26,8 +27,8 @@ const STEPS = [
 
 export default async function HomePage({ searchParams }: PageProps<"/home">) {
   const sp = await searchParams;
-  const { supabase, workspace } = await getSession();
-  const inv = await loadInventory(supabase);
+  const { scope, workspace } = await getSession();
+  const inv = await loadInventory(scope);
   const now = new Date();
 
   if (inv.connections.length === 0) {
@@ -60,10 +61,10 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
     );
   }
 
-  const quotas = await loadQuotaViews(supabase, inv);
-  const [{ data: openAlerts }, { data: costs }] = await Promise.all([
-    supabase.from("alerts").select("*").in("status", ["open", "acknowledged"]).order("created_at", { ascending: false }).limit(200),
-    supabase.from("cost_records").select("*").gt("period_end", now.toISOString()),
+  const quotas = await loadQuotaViews(scope, inv);
+  const [openAlerts, costs] = await Promise.all([
+    listAlerts(scope, { statuses: ["open", "acknowledged"], limit: 200 }),
+    listFutureCosts(scope, now.toISOString()),
   ]);
 
   const active = inv.connections.filter((c) => c.status !== "disconnected");
@@ -94,7 +95,7 @@ export default async function HomePage({ searchParams }: PageProps<"/home">) {
   const trendMetric = getMetric(typeof sp.trend === "string" ? sp.trend : "") ?? trendChoices.find((m) => m.aggregation === "incremental") ?? trendChoices[0];
   const trendScope = trendMetric ? monitored.filter((r) => r.provider === trendMetric.provider).map((r) => r.id) : [];
   const from = new Date(startOfUtcDay(now).getTime() - 29 * DAY_MS);
-  const trendRows = trendMetric && trendScope.length ? await loadSamples(supabase, { metricKeys: [trendMetric.key], resourceIds: trendScope, from }) : [];
+  const trendRows = trendMetric && trendScope.length ? await loadSamples(scope, { metricKeys: [trendMetric.key], resourceIds: trendScope, from }) : [];
   const today = new Date().toISOString().slice(0, 10);
   // Today's daily total is still accumulating; showing it would look like a sudden drop.
   const trend = trendMetric

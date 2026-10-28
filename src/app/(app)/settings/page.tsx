@@ -1,5 +1,6 @@
 import { SubmitButton } from "@/components/form-controls";
 import { Card, CardBody, CardHeader, Checkbox, Flash, Input, KeyValue, Label, Notice, PageHeader, Select } from "@/components/ui";
+import { getProfile } from "@/db/repos/account";
 import { getSession } from "@/lib/session";
 import { changePassword, deleteAccount, updateNotifications, updateProfile, updateWorkspace } from "./actions";
 
@@ -7,8 +8,8 @@ export const metadata = { title: "Settings" };
 
 export default async function SettingsPage({ searchParams }: PageProps<"/settings">) {
   const sp = await searchParams;
-  const { supabase, user, workspace } = await getSession();
-  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  const { scope, user, workspace } = await getSession();
+  const profile = await getProfile(scope);
 
   return (
     <>
@@ -18,7 +19,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         <Card>
           <CardHeader title="Account" />
           <CardBody className="space-y-4">
-            <KeyValue items={[["Email", user.email ?? "—"], ["Member since", new Date(user.created_at).toUTCString().slice(5, 16)]]} />
+            <KeyValue items={[["Email", user.email ?? "—"], ["Member since", profile ? new Date(profile.created_at).toUTCString().slice(5, 16) : "—"]]} />
             <form action={updateProfile} className="flex items-end gap-2">
               <div className="flex-1">
                 <Label htmlFor="displayName">Display name</Label>

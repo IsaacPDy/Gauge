@@ -1,6 +1,7 @@
 import { SubmitButton } from "@/components/form-controls";
 import { CATEGORY_LABEL } from "@/components/status";
 import { Card, CardBody, CardHeader, Checkbox, Flash, Input, PageHeader, Select } from "@/components/ui";
+import { listAlertRules } from "@/db/repos/alerts";
 import { normalizeThresholds } from "@/lib/engine/alerts";
 import { getSession } from "@/lib/session";
 import { DEFAULT_THRESHOLDS } from "@/lib/types";
@@ -18,9 +19,9 @@ const ORDER = ["quota_threshold", "forecast_breach", "cost_overage", "integratio
 
 export default async function AlertRulesPage({ searchParams }: PageProps<"/alerts/rules">) {
   const sp = await searchParams;
-  const { supabase, workspace } = await getSession();
-  const { data } = await supabase.from("alert_rules").select("*");
-  const rules = [...(data ?? [])].sort((a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category));
+  const { scope, workspace } = await getSession();
+  const data = await listAlertRules(scope);
+  const rules = [...data].sort((a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category));
   const quotaRule = rules.find((r) => r.category === "quota_threshold");
   const thresholds = normalizeThresholds(quotaRule?.thresholds) ?? DEFAULT_THRESHOLDS;
   const rows = [...thresholds, ...Array.from({ length: Math.max(0, 6 - thresholds.length) }, () => null)];

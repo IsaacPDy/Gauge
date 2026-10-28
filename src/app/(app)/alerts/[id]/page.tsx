@@ -1,9 +1,11 @@
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { z } from "zod";
 import { AlertStatusBadge, CATEGORY_LABEL, SeverityBadge } from "@/components/status";
 import { formatDate, TimeAgo } from "@/components/time";
 import { Badge, Card, CardBody, CardHeader, Flash, KeyValue, LinkButton, Notice, PageHeader, Table, Td, Th } from "@/components/ui";
+import { getAlertDetail, listDeliveriesForAlert } from "@/db/repos/alerts";
 import { getMetric, PROVIDER_NAMES } from "@/lib/providers/registry";
 import { getSession } from "@/lib/session";
 import { formatPercent, formatValue } from "@/lib/units";
@@ -14,18 +16,15 @@ export const metadata = { title: "Alert" };
 export default async function AlertPage({ params, searchParams }: PageProps<"/alerts/[id]">) {
   const { id } = await params;
   const sp = await searchParams;
-  const { supabase } = await getSession();
-  const { data: a } = await supabase
-    .from("alerts")
-    .select("*, provider_connections(id, label, provider), provider_resources(id, name, dashboard_url), provider_accounts(id, name, dashboard_url), applications(id, name)")
-    .eq("id", id)
-    .maybeSingle();
+  const { scope } = await getSession();
+  if (!z.uuid().safeParse(id).success) notFound();
+  const a = await getAlertDetail(scope, id);
   if (!a) notFound();
-  const { data: deliveries } = await supabase.from("notification_deliveries").select("*").eq("alert_id", a.id).order("channel");
+  const deliveries = await listDeliveriesForAlert(scope, a.id);
 
   const unit = a.unit ?? "count";
   const conn = a.provider_connections;
-  const scope = a.provider_resources?.name ?? a.provider_accounts?.name ?? null;
+  const scopeName = a.provider_resources?.name ?? a.provider_accounts?.name ?? null;
   const dashboard = a.provider_resources?.dashboard_url ?? a.provider_accounts?.dashboard_url ?? null;
   const usageHref =
     a.metric_key && (a.resource_id || a.account_id)
@@ -62,7 +61,7 @@ export default async function AlertPage({ params, searchParams }: PageProps<"/al
                 items={[
                   ["Affected application", a.applications?.name ?? (a.category === "integration_health" ? "All applications using this connection" : "Not assigned / shared billing scope")],
                   ["Provider", conn ? `${PROVIDER_NAMES[conn.provider] ?? conn.provider} · ${conn.label}` : "—"],
-                  ["Billing or resource scope", scope ?? "—"],
+                  ["Billing or resource scope", scopeName ?? "—"],
                   ["Metric", a.metric_key ? (getMetric(a.metric_key)?.name ?? a.metric_key) : "—"],
                   ["Current consumption", a.current_value === null ? "—" : formatValue(Number(a.current_value), unit)],
                   ["Applicable limit", a.limit_value === null ? "—" : formatValue(Number(a.limit_value), unit)],

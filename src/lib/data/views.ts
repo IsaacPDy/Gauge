@@ -1,23 +1,23 @@
 import "server-only";
+import { listAccounts, listApplicationMappings, listApplications, listConnections, listResources } from "../../db/repos/inventory";
+import { listQuotasWithEvaluations } from "../../db/repos/quotas";
+import { loadSamples as querySamples } from "../../db/repos/samples";
+import type { WorkspaceScope } from "../../db/scope";
+import type { Row } from "../../db/types";
 import type { CostEstimate } from "../engine/cost";
 import type { Forecast } from "../engine/forecast";
 import { billingCycle, DAY_MS, startOfUtcDay, type Cycle } from "../engine/time";
 import { currentUsage, dailySeries, type CurrentUsage, type DailyValue, type UsagePoint } from "../engine/usage";
-import { fetchAll } from "../jobs/db";
 import { getAdapter, getMetric, PROVIDER_NAMES } from "../providers/registry";
-import type { Session } from "../session";
-import type { Database } from "../supabase/database.types";
 import type { MetricDefinition } from "../types";
 
-// Read models for pages. Everything here reads stored data through the user's
-// RLS-bound client; no provider API is called while rendering.
+// Read models for pages. Everything here reads stored data for the caller's workspace
+// through repositories; no provider API is called while rendering.
 
-type Client = Session["supabase"];
-type T = Database["public"]["Tables"];
-export type ConnectionRow = T["provider_connections"]["Row"];
-export type AccountRow = T["provider_accounts"]["Row"];
-export type ResourceRow = T["provider_resources"]["Row"];
-export type ApplicationRow = T["applications"]["Row"];
+export type ConnectionRow = Row<"provider_connections">;
+export type AccountRow = Row<"provider_accounts">;
+export type ResourceRow = Row<"provider_resources">;
+export type ApplicationRow = Row<"applications">;
 
 export interface Inventory {
   connections: ConnectionRow[];
@@ -30,23 +30,20 @@ export interface Inventory {
   resourceById: Map<string, ResourceRow>;
 }
 
-export async function loadInventory(supabase: Client): Promise<Inventory> {
-  const [connections, accounts, resources, applications, mappings] = await Promise.all([
-    supabase.from("provider_connections").select("*").order("created_at"),
-    supabase.from("provider_accounts").select("*").order("name"),
-    fetchAll((a, b) => supabase.from("provider_resources").select("*").order("name").range(a, b)),
-    supabase.from("applications").select("*").order("name"),
-    fetchAll((a, b) => supabase.from("application_resources").select("application_id, resource_id").range(a, b)),
+export async function loadInventory(scope: WorkspaceScope): Promise<Inventory> {
+  const [conns, accs, resources, apps, mappings] = await Promise.all([
+    listConnections(scope),
+    listAccounts(scope),
+    listResources(scope),
+    listApplications(scope),
+    listApplicationMappings(scope),
   ]);
-  const apps = applications.data ?? [];
   const appById = new Map(apps.map((a) => [a.id, a]));
   const appByResource = new Map<string, ApplicationRow>();
   for (const m of mappings) {
     const app = appById.get(m.application_id);
     if (app) appByResource.set(m.resource_id, app);
   }
-  const conns = connections.data ?? [];
-  const accs = accounts.data ?? [];
   return {
     connections: conns,
     accounts: accs,
@@ -103,16 +100,14 @@ export interface QuotaView {
   } | null;
 }
 
-export async function loadQuotaViews(supabase: Client, inv: Inventory): Promise<QuotaView[]> {
-  const rows = await fetchAll((a, b) =>
-    supabase.from("quota_rules").select("*, quota_evaluations(*)").order("created_at").range(a, b),
-  );
+export async function loadQuotaViews(scope: WorkspaceScope, inv: Inventory): Promise<QuotaView[]> {
+  const rows = await listQuotasWithEvaluations(scope);
   return rows.map((q) => {
     const metric = getMetric(q.metric_key);
     const resource = q.resource_id ? inv.resourceById.get(q.resource_id) : undefined;
     const account = q.account_id ? inv.accountById.get(q.account_id) : undefined;
     const connection = inv.connectionById.get(resource?.connection_id ?? account?.connection_id ?? "");
-    const ev = Array.isArray(q.quota_evaluations) ? q.quota_evaluations[0] : q.quota_evaluations;
+    const ev = q.quota_evaluations;
     const forecast = ev && ev.forecast && typeof ev.forecast === "object" && "status" in ev.forecast ? (ev.forecast as unknown as Forecast) : null;
     const cost = ev && ev.cost && typeof ev.cost === "object" && "status" in ev.cost ? (ev.cost as unknown as CostEstimate) : null;
     const coverage = (ev?.coverage ?? {}) as { monitored?: number; total?: number; partial?: boolean };
@@ -200,30 +195,10 @@ export interface SampleRow {
 }
 
 export async function loadSamples(
-  supabase: Client,
+  scope: WorkspaceScope,
   opts: { metricKeys?: string[]; resourceIds?: string[]; accountIds?: string[]; from: Date },
 ): Promise<SampleRow[]> {
-  return fetchAll((a, b) => {
-    let q = supabase
-      .from("usage_samples")
-      .select("metric_key, resource_id, account_id, bucket_start, bucket_end, value, observed_at, collected_at, quality, source, dimensions")
-      .gte("bucket_start", opts.from.toISOString())
-      .order("bucket_start")
-      .order("id");
-    if (opts.metricKeys?.length) q = q.in("metric_key", opts.metricKeys);
-    if (opts.resourceIds && opts.accountIds) {
-      const ors = [
-        opts.resourceIds.length ? `resource_id.in.(${opts.resourceIds.join(",")})` : null,
-        opts.accountIds.length ? `account_id.in.(${opts.accountIds.join(",")})` : null,
-      ].filter(Boolean);
-      if (ors.length) q = q.or(ors.join(","));
-    } else if (opts.resourceIds) {
-      q = q.in("resource_id", opts.resourceIds.length ? opts.resourceIds : ["00000000-0000-0000-0000-000000000000"]);
-    } else if (opts.accountIds) {
-      q = q.is("resource_id", null).in("account_id", opts.accountIds.length ? opts.accountIds : ["00000000-0000-0000-0000-000000000000"]);
-    }
-    return q.range(a, b);
-  });
+  return querySamples(scope, opts);
 }
 
 export function toPoints(rows: SampleRow[]): UsagePoint[] {
@@ -239,7 +214,7 @@ export function toPoints(rows: SampleRow[]): UsagePoint[] {
 
 /** Current-cycle usage for every (metric, monitored resource) pair. */
 export async function loadResourceUsage(
-  supabase: Client,
+  scope: WorkspaceScope,
   inv: Inventory,
   resourceIds: string[],
   now = new Date(),
@@ -247,7 +222,7 @@ export async function loadResourceUsage(
   const out = new Map<string, CurrentUsage & { metricKey: string; resourceId: string; source: string | null }>();
   if (!resourceIds.length) return out;
   const from = new Date(startOfUtcDay(now).getTime() - 40 * DAY_MS);
-  const rows = await loadSamples(supabase, { resourceIds, from });
+  const rows = await loadSamples(scope, { resourceIds, from });
   const grouped = new Map<string, SampleRow[]>();
   for (const r of rows) {
     const key = `${r.metric_key}|${r.resource_id}`;

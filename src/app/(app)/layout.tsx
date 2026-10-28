@@ -3,21 +3,13 @@ import Link from "next/link";
 import { CurrencyProvider, CurrencyToggle } from "@/components/currency";
 import { Logo } from "@/components/logo";
 import { InboxLink, SideNav } from "@/components/nav";
+import { countOpenAlerts, countUnreadInApp } from "@/db/repos/alerts";
 import { getDisplay } from "@/lib/currency-server";
 import { getSession } from "@/lib/session";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const { supabase, user, workspace } = await getSession();
-  const [alerts, unread, { display, usdPhp }] = await Promise.all([
-    supabase.from("alerts").select("id", { count: "exact", head: true }).eq("status", "open"),
-    supabase
-      .from("notification_deliveries")
-      .select("id", { count: "exact", head: true })
-      .eq("channel", "in_app")
-      .eq("status", "sent")
-      .is("read_at", null),
-    getDisplay(),
-  ]);
+  const { scope, user, workspace } = await getSession();
+  const [openAlerts, unreadCount, { display, usdPhp }] = await Promise.all([countOpenAlerts(scope), countUnreadInApp(scope), getDisplay()]);
 
   return (
     <CurrencyProvider initial={display.currency} usdPhp={usdPhp}>
@@ -32,11 +24,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </Link>
             <div className="flex items-center gap-2 md:hidden">
               <CurrencyToggle />
-              <InboxLink unread={unread.count ?? 0} />
+              <InboxLink unread={unreadCount} />
             </div>
           </div>
           <div className="px-2 pb-2 md:px-3">
-            <SideNav alertCount={alerts.count ?? 0} />
+            <SideNav alertCount={openAlerts} />
           </div>
         </aside>
 
@@ -47,7 +39,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </p>
             <div className="flex items-center gap-2">
               <CurrencyToggle />
-              <InboxLink unread={unread.count ?? 0} />
+              <InboxLink unread={unreadCount} />
               <span className="hidden max-w-48 truncate text-xs text-muted lg:inline">{user.email}</span>
               <form action="/auth/signout" method="post">
                 <button
