@@ -7,6 +7,9 @@ import { countOpenAlerts, countUnreadInApp } from "@/db/repos/alerts";
 import { getDisplay } from "@/lib/currency-server";
 import { getSession } from "@/lib/session";
 
+// The Neon Auth SDK reads cookies, so every signed-in route must render per request.
+export const dynamic = "force-dynamic";
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { scope, user, workspace } = await getSession();
   const [openAlerts, unreadCount, { display, usdPhp }] = await Promise.all([countOpenAlerts(scope), countUnreadInApp(scope), getDisplay()]);
