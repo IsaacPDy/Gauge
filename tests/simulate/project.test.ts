@@ -86,7 +86,7 @@ describe("cacheVerdict", () => {
   });
 
   it("explains each verdict in plain words", () => {
-    expect(verdict(atQps(50)).message).toBe(`Micro compute handles your peak of 50 queries/sec, so a cache would only add cost.${PAYG_NOTE}`);
+    expect(verdict(atQps(50)).message).toBe("Micro compute handles your peak of 50 queries/sec, so a cache would only add cost.");
     expect(verdict(atQps(120)).message).toMatch(
       /^Without a cache you need Small compute for 120 queries\/sec\. A cache serving 80% of reads would let you use Micro, but it costs about \$[\d,.]+ a month more\. Most of the cache cost/,
     );

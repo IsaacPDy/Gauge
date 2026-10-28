@@ -107,7 +107,7 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
         message: `A cache saves about ${usd(saving)} a month: it keeps you on ${tierWith.label} instead of ${tierNo.label} compute${tail}`,
       };
     }
-    // Upstash's fixed-price plans aren't modelled, so say so when pay-as-you-go commands decide against the cache.
+    // Upstash's fixed-price plans aren't modelled, so say so when pay-as-you-go commands are why the cache loses to more compute.
     const upstashItems = itemsWith.filter((it) => it.service === "upstash");
     const upstashTotal = upstashItems.reduce((s, it) => s + it.cost, 0);
     const commandsCost = upstashItems.filter((it) => it.key === "commands").reduce((s, it) => s + it.cost, 0);
@@ -119,7 +119,7 @@ export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: C
       return {
         ...base,
         kind: "no_cache_needed",
-        message: `${tierNo.label} compute handles your peak of ${qps} queries/sec, so a cache would only add cost.${paygNote}`,
+        message: `${tierNo.label} compute handles your peak of ${qps} queries/sec, so a cache would only add cost.`,
       };
     }
     const message =
