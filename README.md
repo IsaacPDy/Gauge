@@ -146,7 +146,7 @@ Verified on 2026-10-09 against the Management API OpenAPI spec and the "Manage y
    - `APP_URL` is mandatory in production; the app throws without it.
    - Do not enable Neon's Data API. The tables have no row-level security; authorization lives in the app's workspace scopes (`src/db/scope.ts`).
    - `SUPABASE_MANAGEMENT_API_URL` is an optional override for the Supabase adapter's API base URL (default `https://api.supabase.com`).
-3. **Scheduling.** `vercel.json` calls `/api/cron/tick` every 15 minutes, and Vercel sends `Authorization: Bearer $CRON_SECRET` automatically. Vercel's Hobby plan only allows daily crons. Elsewhere, run `npm run worker` as a separate process, or have any scheduler call the endpoint with the bearer token. Each connection's collection interval defaults to 6 hours.
+3. **Scheduling.** `vercel.json` calls `/api/cron/tick` once a day at 06:00 UTC, and Vercel sends `Authorization: Bearer $CRON_SECRET` automatically. That is the most often Vercel's Hobby plan allows (a more frequent schedule makes the deployment fail), so each connection is collected about once a day and alerts are evaluated once a day. On Vercel Pro, change the schedule to `*/15 * * * *` for near-real-time monitoring. Elsewhere, run `npm run worker` as a separate process, or have any scheduler call the endpoint with the bearer token. Each connection's collection interval defaults to 6 hours.
 
 **Session caching.** The Auth SDK trusts its session cache cookie for about 5 minutes. After you delete an account or revoke a session, another device may keep working for up to that long.
 
