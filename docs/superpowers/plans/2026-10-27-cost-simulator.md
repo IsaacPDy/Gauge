@@ -6,7 +6,7 @@
 
 **Architecture:** A pure, deterministic engine in `src/lib/engine/simulate/` turns inputs into resolved stack → monthly usage → priced line items → projection, verdict and events. The page is a thin server component that decodes URL params, then hands off to a client component that re-runs the engine on every change and mirrors the inputs into the URL. There is no database or server work.
 
-**Tech Stack:** Next.js 16 (app router), React 19, TypeScript, Tailwind 4, Recharts 3, zod 4, Vitest 5, lucide-react.
+**Tech Stack:** Next.js 16 (app router), React 19, TypeScript, Tailwind 4, Recharts 3, Vitest 5, lucide-react.
 
 **Spec:** `docs/superpowers/specs/2026-10-27-cost-simulator-design.md`
 
@@ -16,6 +16,8 @@
 - **The URL is synced with `window.history.replaceState`**, not `router.replace`. Next.js supports this natively, and it avoids re-running the server component on every keystroke.
 - **Tests live in `tests/simulate/*.test.ts`** (one file per module), not a single `tests/simulate.test.ts`.
 - **Each `SimEvent` carries a `key`**, its dedupe key, used for React keys and in tests.
+
+**Changes made during execution (from task reviews):** `inputs.ts` parses numbers with `Number()` instead of zod (keeps zod out of the client bundle); routing notices were reworded; the verdict messages, event wording and credit-aware `credit_used_up` events were rewritten; month-1 overages are no longer events; the view follows URL changes via `useSearchParams`; chart hatching is per service. The code is the source of truth where it differs from the snippets below.
 
 **Conventions to follow:**
 - Engine files use relative imports (`../cost`, `../../units`). App and test files use `@/…`.

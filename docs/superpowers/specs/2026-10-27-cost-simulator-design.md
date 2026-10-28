@@ -36,7 +36,7 @@ side of CloudWatch and works before an app has launched.
 
 ```
 src/lib/engine/simulate/
-  inputs.ts     zod schema, presets, defaults, URL encode/decode
+  inputs.ts     field definitions, presets, defaults, URL encode/decode
   workload.ts   inputs → derived monthly usage (pure)
   catalog.ts    versioned price sheets per service and plan, plus Supabase compute sizes
   price.ts      usage + stack → line items per service (pure)
@@ -48,7 +48,7 @@ src/app/(app)/simulator/
   simulator-form.tsx     inputs
   simulator-results.tsx  KPI tiles, verdict, chart, timeline, line items, provenance
 src/components/nav.tsx   new "Simulator" item (Calculator icon)
-tests/simulate.test.ts
+tests/simulate/*.test.ts   one test file per engine module
 ```
 
 Each engine file is pure and deterministic: same inputs, same output. Only
@@ -298,8 +298,13 @@ Verdict (shown for month 1, with the month it changes):
 | No tier fits | The largest size doesn't fit without a cache. Says whether the cache fixes it |
 | Not applicable | Supabase off, or `host = direct` |
 
-The verdict also gives the first month in which it becomes "Add a cache", if that
-happens within 12 months.
+The verdict also gives the first month in which a cache becomes the better option,
+if that happens within 12 months: the verdict becomes "Add a cache", or no size fits
+without a cache but one does with it.
+
+When pay-as-you-go commands make up most of the cache cost and the cache loses, the
+message says so: only Upstash pay-as-you-go is priced, and its fixed-price plans may
+be cheaper at high command volumes.
 
 ## Projection and events (`project.ts`)
 
@@ -318,15 +323,19 @@ interface SimulationResult {
 }
 ```
 
-The projection covers 12 months. Each event fires once, in the first month it
-becomes true:
-- `plan_limit`: a restricted item, e.g. "MAU passes the Free limit (50 000). Pro is required".
-- `overage_start`: an item first goes above its included quantity on a paid plan.
-- `compute_upgrade`: auto compute moves to a larger size.
+The projection covers 12 months. Month 1 is the starting state: overages already
+present in month 1 show in the line items, not as events. Each event fires once, in
+the first month it becomes true (compute upgrades can fire in several months):
+- `plan_limit`: a restricted item, e.g. "Over the plan limit for File storage (1 GB included). A paid plan is required."
+- `overage_start`: an item first goes above its included quantity on a paid plan, after month 1.
+  Items covered by a usage credit don't get this event; see `credit_used_up`.
+- `credit_used_up`: usage on items a plan credit covers (e.g. Vercel Pro's $20) first
+  exceeds the credit, after month 1.
+- `compute_upgrade`: auto compute moves to a larger size, with the price difference.
 - `compute_saturated`: a fixed size no longer fits.
-- `cache_pays_off`: the verdict flips to "Add a cache".
+- `cache_pays_off`: a cache becomes the better option (see the verdict), after month 1.
 
-A price sheet is `stale` when `verifiedAt` is more than 90 days before today.
+A price sheet is `stale` when `verifiedAt` is more than 90 whole UTC days before today, or isn't a valid date.
 
 ## UI (`/simulator`)
 
@@ -372,7 +381,7 @@ Results:
 - No service enabled: the results area shows an empty state asking you to pick one.
 - Very large numbers are formatted with `src/lib/units.ts`.
 
-## Testing (`tests/simulate.test.ts`)
+## Testing (`tests/simulate/*.test.ts`)
 
 - The workload formulas for one fixed input set, including the DB queries override
   and negative growth.
