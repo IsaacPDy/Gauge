@@ -160,7 +160,7 @@ function EnumInput({
 }
 
 /** Stack choices that apply to every plan on the comparison page. */
-const ROUTING_FIELDS = new Set<string>(["compute", "host", "fileStore"]);
+const ROUTING_FIELDS = new Set<string>(["compute", "cache", "host", "fileStore"]);
 
 export function SimulatorForm({
   inputs,
@@ -180,10 +180,13 @@ export function SimulatorForm({
   const routing = stackFields === "routing";
   // Only the sizes the current plan can use: Free runs on its single size, everything else on the paid ones.
   const planSizes = CATALOG.compute.filter((c) => (inputs.supabase === "free" ? c.key === CATALOG.freeCompute : c.key !== CATALOG.freeCompute));
+  // The comparison prices both Free (Nano) and the paid sizes, so it lists capacity for every size.
+  const capacitySizes = routing ? CATALOG.compute : planSizes;
   const bothBackends = inputs.supabase !== "off" && inputs.firebase !== "off";
   // Compute is pinned while it can't change the price; the comparison prices every plan, so it never pins.
-  // With Firebase holding the database, Supabase is priced at its smallest size for the plan.
-  const filesOnly = !routing && bothBackends && inputs.db === "firebase";
+  // With Firebase holding the database and files on Supabase, Supabase is priced at its smallest size
+  // for the plan. With files elsewhere too, Supabase isn't priced at all, so compute stays editable.
+  const filesOnly = !routing && bothBackends && inputs.db === "firebase" && inputs.fileStore === "supabase";
   const freeCompute = !routing && inputs.supabase === "free";
   const pinnedCompute = filesOnly || freeCompute ? planSizes[0].key : undefined;
   const computeHint = filesOnly ? "Supabase only stores files" : freeCompute ? "Free uses Nano" : undefined;
@@ -256,7 +259,7 @@ export function SimulatorForm({
             <p className="col-span-2 mt-2 mb-3 text-xs text-muted">
               Planning capacity per compute size, in queries/sec. Supabase doesn&apos;t publish these figures; they&apos;re rules of thumb you can tune to your own queries.
             </p>
-            {planSizes.map((size) => (
+            {capacitySizes.map((size) => (
               <NumberInput
                 key={size.key}
                 id={`sim-qps-${size.key}`}

@@ -59,7 +59,7 @@ export function CompareView({ initialNotices, now }: { initialNotices: string[];
       <div className="flex min-w-0 flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Link href={`/simulator?${sim.query}`} className="text-sm font-medium text-accent hover:underline">
-            ← Back to simulator
+            <span aria-hidden>←</span> Back to simulator
           </Link>
           <MonthSelect months={MONTHS} value={month} onChange={setMonth} />
         </div>

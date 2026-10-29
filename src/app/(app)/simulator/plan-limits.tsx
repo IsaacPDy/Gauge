@@ -90,7 +90,7 @@ export function PlanLimits({ result, month, onMonth, compareHref }: { result: Si
         description="How close this month's usage is to each plan's allowance, and what you pay past it."
         actions={
           <>
-            <MonthSelect months={result.months.length} value={month} onChange={onMonth} />
+            <MonthSelect months={result.months.length} value={month} onChange={onMonth} label="Month for plan limits" />
             <Link href={compareHref} className="text-xs font-medium text-accent hover:underline">
               Compare plans
             </Link>

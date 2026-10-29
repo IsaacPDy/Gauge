@@ -117,7 +117,7 @@ export function SimulatorResults({ result, month, onMonth, query }: { result: Si
         <CardHeader
           title="Line items"
           description="Usage, included allowance and estimated cost per service."
-          actions={<MonthSelect months={result.months.length} value={month} onChange={onMonth} />}
+          actions={<MonthSelect months={result.months.length} value={month} onChange={onMonth} label="Month for line items" />}
         />
         <Table className="min-w-[34rem]">
           <thead>
