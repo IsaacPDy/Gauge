@@ -220,7 +220,7 @@ export function SimulatorForm({
       <Card>
         <CardHeader
           title={routing ? "Routing" : "Stack"}
-          description={routing ? "Every plan is shown on the right. These choices apply to all of them." : "Turn on the services you use."}
+          description={routing ? "Every plan is compared, so there's no plan to pick. These choices apply to all of them." : "Turn on the services you use."}
         />
         <CardBody className={FIELD_GRID}>
           {stack.map((f) => (
