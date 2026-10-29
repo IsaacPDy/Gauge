@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { graduatedCost } from "@/lib/engine/cost";
-import type { Catalog } from "@/lib/engine/simulate/catalog";
+import { type Catalog, GB_PER_GIB } from "@/lib/engine/simulate/catalog";
 import { priceMonth } from "@/lib/engine/simulate/price";
-import { ROUTING_CATALOG, stackWith, TEST_CATALOG, zeroUsage } from "./fixtures";
+import { resolveStack } from "@/lib/engine/simulate/stack";
+import { inputsWith, ROUTING_CATALOG, stackWith, TEST_CATALOG, zeroUsage } from "./fixtures";
 
 const sum = (items: { cost: number }[]) => Math.round(items.reduce((s, i) => s + i.cost, 0) * 100) / 100;
 const of = <T extends { service: string }>(items: T[], service: string) => items.filter((i) => i.service === service);
@@ -151,5 +152,38 @@ describe("priceMonth with tiers", () => {
     };
     const items = priceMonth(zeroUsage({ mau: 250_000 }), stackWith(), "micro", catalog);
     expect(items.find((i) => i.service === "supabase" && i.key === "mau")?.cost).toBe(375);
+  });
+});
+
+describe("priceMonth with Firebase", () => {
+  const firebaseOnly = resolveStack(inputsWith({ supabase: "off", firebase: "blaze" })).stack;
+
+  it("maps database, auth and file usage to Firebase when it is the backend", () => {
+    const u = zeroUsage({ mau: 60_000, reads: 2_000_000, rtMessages: 500_000, dbSizeGB: 3 * GB_PER_GIB, storageGB: 10 * GB_PER_GIB });
+    const fb = of(priceMonth(u, firebaseOnly, null, TEST_CATALOG), "firebase");
+    expect(fb.find((i) => i.key === "auth_mau")).toMatchObject({ usage: 60_000, cost: 55 });
+    // Realtime listener updates are billed as document reads.
+    expect(fb.find((i) => i.key === "fs_reads")).toMatchObject({ usage: 2_500_000, cost: 0.3 });
+    expect(fb.find((i) => i.key === "fs_storage_gib")).toMatchObject({ usage: 3, cost: 0.3 });
+    expect(fb.find((i) => i.key === "storage_gib")).toMatchObject({ usage: 10, cost: 0.1 });
+  });
+
+  it("prices only files on the backend that doesn't hold the database", () => {
+    const u = zeroUsage({ mau: 120_000, backendEgressGB: 200, fileEgressGB: 100, storageGB: 10 * GB_PER_GIB });
+    const sbFiles = priceMonth(u, stackWith({ firebase: "blaze", db: "firebase" }), "micro", TEST_CATALOG);
+    expect(sbFiles.find((i) => i.service === "supabase" && i.key === "mau")?.usage).toBe(0);
+    expect(sbFiles.find((i) => i.service === "supabase" && i.key === "egress_gb")?.usage).toBe(100);
+    expect(sbFiles.find((i) => i.service === "firebase" && i.key === "auth_mau")?.usage).toBe(120_000);
+
+    const fbFiles = priceMonth(u, stackWith({ firebase: "blaze", fileStore: "firebase" }), "micro", TEST_CATALOG);
+    expect(fbFiles.find((i) => i.service === "firebase" && i.key === "auth_mau")?.usage).toBe(0);
+    expect(fbFiles.find((i) => i.service === "firebase" && i.key === "storage_gib")?.usage).toBe(10);
+  });
+
+  it("restricts Cloud Functions on Spark as soon as they're used", () => {
+    const spark = resolveStack(inputsWith({ supabase: "off", firebase: "spark" })).stack;
+    // Vercel Pro has an fn_invocations item too, so match the service.
+    const fn = priceMonth(zeroUsage({ fnInvocations: 10 }), spark, null, TEST_CATALOG).find((i) => i.service === "firebase" && i.key === "fn_invocations")!;
+    expect(fn).toMatchObject({ service: "firebase", restricted: true, cost: 0 });
   });
 });

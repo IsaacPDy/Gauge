@@ -57,6 +57,29 @@ export const TEST_CATALOG: Catalog = {
       items: [per("fn_invocations", 1_000_000, 0.6, 1_000_000), per("transfer_gb", 1_000, 0.15)],
     },
     { ...sheet, service: "cloudflare", plan: "paid", label: "Cloudflare Paid", sourceUrl: "https://example.test/cf", baseFee: 5, items: [per("requests", 10_000_000, 0.3, 1_000_000), per("r2_storage_gb", 10, 0.015)] },
+    {
+      ...sheet,
+      service: "firebase",
+      plan: "spark",
+      label: "Firebase Spark",
+      sourceUrl: "https://example.test/fb",
+      baseFee: 0,
+      items: [per("auth_mau", 50_000, null), per("fs_reads", 1_500_000, null), per("fn_invocations", 0, null), per("storage_gib", 0, null)],
+    },
+    {
+      ...sheet,
+      service: "firebase",
+      plan: "blaze",
+      label: "Firebase Blaze",
+      sourceUrl: "https://example.test/fb",
+      baseFee: 0,
+      items: [
+        { ...per("auth_mau", 50_000, 0.0055), tiers: [{ upTo: 100_000, unitPrice: 0.0055 }, { upTo: null, unitPrice: 0.0046 }] },
+        per("fs_reads", 1_500_000, 0.03, 100_000),
+        per("fs_storage_gib", 1, 0.15),
+        per("storage_gib", 5, 0.02),
+      ],
+    },
   ],
 };
 

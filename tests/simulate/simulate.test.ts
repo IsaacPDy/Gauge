@@ -41,9 +41,23 @@ describe("simulate", () => {
     const later = simulate(inputsWith(), { catalog: TEST_CATALOG, now: new Date("2027-02-01T00:00:00Z") });
     expect(later.provenance.every((p) => p.stale)).toBe(true);
   });
+
   it("reports which backend holds the database", () => {
     expect(run(inputsWith()).backend).toBe("supabase");
     expect(run(inputsWith({ supabase: "off" })).backend).toBeNull();
+  });
+
+  it("produces finite, non-negative totals for every preset with Firebase as the backend", () => {
+    for (const p of PRESETS) {
+      for (const firebase of ["spark", "blaze"] as const) {
+        const r = simulate({ ...presetInputs(p), firebase, db: "firebase" }, { now: NOW });
+        expect(r.backend).toBe("firebase");
+        for (const m of r.months) {
+          expect(Number.isFinite(m.total)).toBe(true);
+          expect(m.total).toBeGreaterThanOrEqual(0);
+        }
+      }
+    }
   });
 });
 
