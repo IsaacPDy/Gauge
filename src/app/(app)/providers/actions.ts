@@ -13,10 +13,11 @@ import { audit, countRecentAudits } from "@/lib/audit";
 import { deleteCredentials, saveCredentials } from "@/lib/jobs/credentials";
 import { recalculateWorkspace } from "@/lib/jobs/recalc";
 import { runConnectionSync } from "@/lib/jobs/sync";
-import { demoEnabled, getAdapter } from "@/lib/providers/registry";
+import { demoEnabled, getAdapter, PROVIDER_NAMES, tokenProvider } from "@/lib/providers/registry";
 import { oauthConfigured, revokeTokens } from "@/lib/providers/supabase/oauth";
 import { type Credentials, type DemoSimulation, ProviderError } from "@/lib/providers/types";
 import { getSession } from "@/lib/session";
+import type { ProviderId } from "@/lib/types";
 import { safeNext, withParams } from "@/lib/urls";
 
 export type FormState = { error?: string } | undefined;
@@ -68,7 +69,7 @@ async function tooManyConnectionAttempts(workspaceId: string) {
 
 async function createConnection(opts: {
   scope: WorkspaceScope;
-  provider: "supabase" | "demo";
+  provider: ProviderId;
   label: string;
   authMethod: "token" | "demo" | "oauth";
   credentials: Credentials;
@@ -103,7 +104,10 @@ const tokenForm = z.object({
   token: z.string().trim().min(10, "Paste a valid access token").max(500),
 });
 
-export async function connectSupabaseToken(_: FormState, form: FormData): Promise<FormState> {
+/** Connects any token provider. Bound to a provider id on the connect page. */
+export async function connectToken(provider: string, _: FormState, form: FormData): Promise<FormState> {
+  const adapter = tokenProvider(provider);
+  if (!adapter) return { error: "This provider can't be connected with a token yet." };
   const { user, workspace, scope } = await getSession();
   const parsed = tokenForm.safeParse({ label: form.get("label"), token: form.get("token") });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
@@ -112,20 +116,24 @@ export async function connectSupabaseToken(_: FormState, form: FormData): Promis
   const credentials: Credentials = { kind: "token", token: parsed.data.token };
   let grantedScopes: string[];
   try {
-    ({ grantedScopes } = await getAdapter("supabase")!.validate({ credentials, now: new Date() }));
+    ({ grantedScopes } = await adapter.validate({ credentials, now: new Date() }));
   } catch (e) {
-    await audit({ workspaceId: workspace.id, actorId: user.id, action: "connection.create_failed", details: { provider: "supabase" } });
+    await audit({ workspaceId: workspace.id, actorId: user.id, action: "connection.create_failed", details: { provider: adapter.id } });
     return { error: describeProviderError(e) };
   }
   const id = await createConnection({
     scope,
-    provider: "supabase",
+    provider: adapter.id,
     label: parsed.data.label,
     authMethod: "token",
     credentials,
     grantedScopes,
   });
   redirect(`/providers/${id}?setup=1`);
+}
+
+export async function connectSupabaseToken(state: FormState, form: FormData): Promise<FormState> {
+  return connectToken("supabase", state, form);
 }
 
 export async function connectDemo() {
@@ -276,7 +284,7 @@ export async function disconnect(form: FormData) {
   revalidatePath("/", "layout");
   const note =
     connection.auth_method === "token"
-      ? "Disconnected and deleted the stored token. Also revoke the token in your Supabase account settings."
+      ? `Disconnected and deleted the stored token. Also revoke the token in your ${PROVIDER_NAMES[connection.provider] ?? connection.provider} account settings.`
       : "Disconnected and deleted the stored credentials.";
   redirect(withParams(`/providers/${connection.id}`, { ok: note }));
 }

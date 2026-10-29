@@ -10,11 +10,19 @@ export function TokenForm({
   connectionId,
   withLabel,
   submit,
+  defaultLabel = "Supabase",
+  tokenLabel = "Personal access token",
+  tokenHint = "(starts with sbp_)",
+  placeholder = "sbp_…",
 }: {
   action: (s: FormState, f: FormData) => Promise<FormState>;
   connectionId?: string;
   withLabel?: boolean;
   submit: string;
+  defaultLabel?: string;
+  tokenLabel?: string;
+  tokenHint?: string;
+  placeholder?: string;
 }) {
   const [state, formAction] = useActionState(action, undefined);
   return (
@@ -24,14 +32,14 @@ export function TokenForm({
       {withLabel ? (
         <div>
           <Label htmlFor="label">Connection name</Label>
-          <Input id="label" name="label" defaultValue="Supabase" maxLength={80} required />
+          <Input id="label" name="label" defaultValue={defaultLabel} maxLength={80} required />
         </div>
       ) : null}
       <div>
-        <Label htmlFor="token" hint="(starts with sbp_)">
-          Personal access token
+        <Label htmlFor="token" hint={tokenHint || undefined}>
+          {tokenLabel}
         </Label>
-        <Input id="token" name="token" type="password" autoComplete="off" spellCheck={false} placeholder="sbp_…" required />
+        <Input id="token" name="token" type="password" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
       </div>
       <SubmitButton pendingText="Validating and discovering…">{submit}</SubmitButton>
     </form>
