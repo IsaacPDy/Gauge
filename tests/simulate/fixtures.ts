@@ -57,6 +57,29 @@ export const TEST_CATALOG: Catalog = {
       items: [per("fn_invocations", 1_000_000, 0.6, 1_000_000), per("transfer_gb", 1_000, 0.15)],
     },
     { ...sheet, service: "cloudflare", plan: "paid", label: "Cloudflare Paid", sourceUrl: "https://example.test/cf", baseFee: 5, items: [per("requests", 10_000_000, 0.3, 1_000_000), per("r2_storage_gb", 10, 0.015)] },
+    {
+      ...sheet,
+      service: "firebase",
+      plan: "spark",
+      label: "Firebase Spark",
+      sourceUrl: "https://example.test/fb",
+      baseFee: 0,
+      items: [per("auth_mau", 50_000, null), per("fs_reads", 1_500_000, null), per("fn_invocations", 0, null), per("storage_gib", 0, null)],
+    },
+    {
+      ...sheet,
+      service: "firebase",
+      plan: "blaze",
+      label: "Firebase Blaze",
+      sourceUrl: "https://example.test/fb",
+      baseFee: 0,
+      items: [
+        { ...per("auth_mau", 50_000, 0.0055), tiers: [{ upTo: 100_000, unitPrice: 0.0055 }, { upTo: null, unitPrice: 0.0046 }] },
+        per("fs_reads", 1_500_000, 0.03, 100_000),
+        per("fs_storage_gib", 1, 0.15),
+        per("storage_gib", 5, 0.02),
+      ],
+    },
   ],
 };
 
@@ -69,7 +92,7 @@ export const FREE_CACHE_CATALOG: Catalog = {
 export function zeroUsage(overrides: Partial<MonthUsage> = {}): MonthUsage {
   return {
     month: 1, mau: 0, dau: 0, requests: 0, dbQueries: 0, reads: 0, writes: 0, cacheHits: 0, dbHits: 0,
-    avgDbQps: 0, peakDbQps: 0, peakConnections: 0, apiEgressGB: 0, hostEgressGB: 0, supabaseEgressGB: 0,
+    avgDbQps: 0, peakDbQps: 0, peakConnections: 0, apiEgressGB: 0, hostEgressGB: 0, backendEgressGB: 0,
     fileEgressGB: 0, dbSizeGB: 0, storageGB: 0, storageAddedGB: 0, fnInvocations: 0, rtPeakConnections: 0,
     rtMessages: 0, serverRequests: 0, cpuMs: 0, cacheCommands: 0, cacheStorageGB: 0, cacheKeys: 0,
     fileWrites: 0, fileReads: 0,

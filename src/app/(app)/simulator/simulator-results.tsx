@@ -3,12 +3,14 @@
 import { Calculator, ExternalLink } from "lucide-react";
 import { CostProjectionChart } from "@/components/charts";
 import { useCurrency } from "@/components/currency";
-import { Badge, Card, CardBody, CardHeader, EmptyState, Notice, Select, StatCard, Table, Td, Th, type Tone } from "@/components/ui";
+import { Badge, Card, CardBody, CardHeader, EmptyState, Notice, StatCard, Table, Td, Th, type Tone } from "@/components/ui";
 import type { SimulationResult, VerdictKind } from "@/lib/engine/simulate";
 import { CATALOG, SERVICE_LABELS } from "@/lib/engine/simulate/catalog";
 import { formatAmount, formatPerUser, formatQps } from "@/lib/engine/simulate/format";
 import { convertUsd, formatUsdAs } from "@/lib/currency";
 import { formatCount } from "@/lib/units";
+import { MonthSelect } from "./month-select";
+import { PlanLimits } from "./plan-limits";
 
 const FIXED_KEYS = new Set(["base", "compute", "credit"]);
 const VERDICT: Record<VerdictKind, { title: string; tone: Tone }> = {
@@ -19,7 +21,7 @@ const VERDICT: Record<VerdictKind, { title: string; tone: Tone }> = {
   not_applicable: { title: "Cache comparison not available", tone: "neutral" },
 };
 
-export function SimulatorResults({ result, month, onMonth }: { result: SimulationResult; month: number; onMonth: (m: number) => void }) {
+export function SimulatorResults({ result, month, onMonth, query }: { result: SimulationResult; month: number; onMonth: (m: number) => void; query: string }) {
   const display = useCurrency();
   const usd = (n: number) => formatUsdAs(n, display);
   const services = result.provenance.map((p) => p.service);
@@ -27,7 +29,7 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
     return (
       <Card>
         <EmptyState icon={<Calculator className="size-8" />} title="Pick at least one service">
-          Turn on Supabase, Vercel or Cloudflare to see estimated costs.
+          Turn on Supabase, Firebase, Vercel or Cloudflare to see estimated costs.
         </EmptyState>
       </Card>
     );
@@ -54,13 +56,19 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
         <StatCard label="Cost per MAU" value={first.usage.mau > 0 ? formatPerUser(first.total / first.usage.mau, display) : "—"} hint="month 1" />
         <StatCard
           label="Peak DB load"
-          value={first.computeSize ? `${formatQps(first.usage.peakDbQps)} q/s` : "—"}
-          hint={first.computeSize ? `month 1, ${CATALOG.compute.find((c) => c.key === first.computeSize)?.label} compute` : "Supabase is off"}
+          value={result.backend !== null ? `${formatQps(first.usage.peakDbQps)} q/s` : "—"}
+          hint={
+            result.backend === "supabase"
+              ? `month 1, ${CATALOG.compute.find((c) => c.key === first.computeSize)?.label} compute`
+              : result.backend === "firebase"
+                ? "month 1, Firestore scales automatically"
+                : "No database is on"
+          }
         />
       </div>
 
       {/* The cache comparison only means something when there is a database to put a cache in front of. */}
-      {first.computeSize !== null ? (
+      {result.backend === "supabase" ? (
         <Notice tone={verdict.tone} title={verdict.title}>
           <p>{result.verdict.message}</p>
           {/* Month 1 is the verdict itself, so only a later payoff is worth saying. */}
@@ -69,6 +77,8 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
           ) : null}
         </Notice>
       ) : null}
+
+      <PlanLimits result={result} month={month} onMonth={onMonth} compareHref={`/simulator/compare?${query}`} />
 
       <Card>
         <CardHeader title="12-month projection" description="Monthly cost by service. Growth compounds each month." />
@@ -107,15 +117,7 @@ export function SimulatorResults({ result, month, onMonth }: { result: Simulatio
         <CardHeader
           title="Line items"
           description="Usage, included allowance and estimated cost per service."
-          actions={
-            <Select aria-label="Month" value={month} onChange={(e) => onMonth(Number(e.target.value))} className="h-7 w-auto text-xs">
-              {result.months.map((m) => (
-                <option key={m.month} value={m.month}>
-                  Month {m.month}
-                </option>
-              ))}
-            </Select>
-          }
+          actions={<MonthSelect months={result.months.length} value={month} onChange={onMonth} label="Month for line items" />}
         />
         <Table className="min-w-[34rem]">
           <thead>

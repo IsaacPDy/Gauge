@@ -192,6 +192,23 @@ export default async function ConnectionPage({ params, searchParams }: PageProps
                 </details>
               </>
             ) : null}
+            {conn.provider !== "supabase" && getAdapter(conn.provider)?.tokenConnect ? (
+              <details open={conn.status === "reauth_required" || conn.status === "disconnected"}>
+                <summary className="cursor-pointer text-sm font-medium">
+                  Replace {getAdapter(conn.provider)!.tokenConnect!.tokenLabel.toLowerCase()}
+                </summary>
+                <div className="mt-3">
+                  <TokenForm
+                    action={replaceToken}
+                    connectionId={conn.id}
+                    tokenLabel={getAdapter(conn.provider)!.tokenConnect!.tokenLabel}
+                    tokenHint={getAdapter(conn.provider)!.tokenConnect!.tokenHint ?? ""}
+                    placeholder={getAdapter(conn.provider)!.tokenConnect!.placeholder ?? ""}
+                    submit="Validate and replace"
+                  />
+                </div>
+              </details>
+            ) : null}
             {conn.provider === "demo" ? (
               <form action={setDemoSimulation} className="space-y-2">
                 <input type="hidden" name="connectionId" value={conn.id} />

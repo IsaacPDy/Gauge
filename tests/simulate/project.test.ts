@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cacheVerdict, chooseCompute } from "@/lib/engine/simulate/project";
-import { DIRECT_REASON, NO_SUPABASE_REASON, resolveStack } from "@/lib/engine/simulate/stack";
+import { DIRECT_REASON, FIREBASE_BACKEND_REASON, NO_SUPABASE_REASON, resolveStack } from "@/lib/engine/simulate/stack";
 import { workloadMonths } from "@/lib/engine/simulate/workload";
 import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
 import type { SimInputs } from "@/lib/engine/simulate/inputs";
@@ -127,5 +127,17 @@ describe("cacheVerdict", () => {
   it("returns the shared reasons when it doesn't apply", () => {
     expect(verdict(inputsWith({ host: "direct" })).message).toBe(DIRECT_REASON);
     expect(verdict(inputsWith({ supabase: "off" })).message).toBe(NO_SUPABASE_REASON);
+  });
+});
+
+describe("Firebase as the database", () => {
+  it("gives the cache verdict as not applicable", () => {
+    const v = verdict(inputsWith({ supabase: "off", firebase: "blaze", cache: "upstash_payg" }));
+    expect(v.kind).toBe("not_applicable");
+    expect(v.message).toBe(FIREBASE_BACKEND_REASON);
+  });
+
+  it("puts a files-only Supabase on its smallest paid size, whatever the database load", () => {
+    expect(compute(atQps(500, { firebase: "blaze", db: "firebase" }))).toEqual({ key: "micro", fits: true });
   });
 });

@@ -43,7 +43,8 @@ export function errorForStatus(res: Response, bodyText: string): ProviderError {
   }
 }
 
-export async function requestJson<T>(url: string, opts: RequestOptions = {}): Promise<T> {
+/** Fetches a URL with retries and normalized errors, returning the body as text. */
+export async function requestText(url: string, opts: RequestOptions = {}): Promise<string> {
   const { fetch: fetchImpl = fetch, timeoutMs = 20_000, retries = 2, backoffMs = 500, ...init } = opts;
   let attempt = 0;
   for (;;) {
@@ -51,14 +52,7 @@ export async function requestJson<T>(url: string, opts: RequestOptions = {}): Pr
     try {
       const res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
       const text = await res.text();
-      if (res.ok) {
-        if (!text) return undefined as T;
-        try {
-          return JSON.parse(text) as T;
-        } catch {
-          throw new ProviderError("invalid_response", "Provider returned invalid JSON");
-        }
-      }
+      if (res.ok) return text;
       err = errorForStatus(res, text);
     } catch (e) {
       if (e instanceof ProviderError) throw e;
@@ -69,5 +63,15 @@ export async function requestJson<T>(url: string, opts: RequestOptions = {}): Pr
     const delay = Math.min(10_000, err.options.retryAfterMs ?? backoffMs * 2 ** attempt + Math.random() * backoffMs);
     attempt++;
     await sleep(delay);
+  }
+}
+
+export async function requestJson<T>(url: string, opts: RequestOptions = {}): Promise<T> {
+  const text = await requestText(url, opts);
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ProviderError("invalid_response", "Provider returned invalid JSON");
   }
 }

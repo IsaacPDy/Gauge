@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatUsdAs } from "@/lib/currency";
 import { simulate } from "@/lib/engine/simulate";
+import { CATALOG } from "@/lib/engine/simulate/catalog";
 import { PRESETS, presetInputs, type SimInputs } from "@/lib/engine/simulate/inputs";
 import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
 
@@ -41,6 +42,24 @@ describe("simulate", () => {
     const later = simulate(inputsWith(), { catalog: TEST_CATALOG, now: new Date("2027-02-01T00:00:00Z") });
     expect(later.provenance.every((p) => p.stale)).toBe(true);
   });
+
+  it("reports which backend holds the database", () => {
+    expect(run(inputsWith()).backend).toBe("supabase");
+    expect(run(inputsWith({ supabase: "off" })).backend).toBeNull();
+  });
+
+  it("produces finite, non-negative totals for every preset with Firebase as the backend", () => {
+    for (const p of PRESETS) {
+      for (const firebase of ["spark", "blaze"] as const) {
+        const r = simulate({ ...presetInputs(p), firebase, db: "firebase" }, { now: NOW });
+        expect(r.backend).toBe("firebase");
+        for (const m of r.months) {
+          expect(Number.isFinite(m.total)).toBe(true);
+          expect(m.total).toBeGreaterThanOrEqual(0);
+        }
+      }
+    }
+  });
 });
 
 describe("events", () => {
@@ -49,6 +68,17 @@ describe("events", () => {
     const mau = r.events.filter((e) => e.key === "limit:supabase:mau");
     expect(mau).toHaveLength(1);
     expect(mau[0]).toMatchObject({ month: 3, kind: "plan_limit", service: "supabase" });
+  });
+
+  it("says when the plan doesn't offer an item at all", () => {
+    const inputs = inputsWith({ supabase: "off", firebase: "spark", fileStore: "firebase", functionPct: 5, fileMBPerUser: 20, fileDownloadMBPerUser: 30 });
+    const message = (key: string, catalog = TEST_CATALOG) => run(inputs, catalog).events.find((e) => e.key === `limit:firebase:${key}`)?.message;
+    // TEST_CATALOG labels items by key; the real catalog has the display label.
+    expect(run(inputs).events.find((e) => e.key === "limit:firebase:fn_invocations")).toMatchObject({ kind: "plan_limit", service: "firebase" });
+    expect(message("fn_invocations")).toBe("This plan doesn't include fn_invocations. A paid plan is required.");
+    expect(message("fn_invocations", CATALOG)).toBe("This plan doesn't include Cloud Functions invocations. A paid plan is required.");
+    expect(message("storage_gib", CATALOG)).toBe("This plan doesn't include Cloud Storage. A paid plan is required.");
+    expect(message("storage_egress_gib", CATALOG)).toBe("This plan doesn't include Cloud Storage downloads. A paid plan is required.");
   });
 
   it("fires when overage charges start on a paid plan", () => {

@@ -193,6 +193,22 @@ export interface PlanAllowance {
   verifiedAt: string;
 }
 
+/** What the generic connect page shows for a provider that takes a pasted token. */
+export interface TokenConnectInfo {
+  /** "Access token", "API token", "API key". */
+  tokenLabel: string;
+  /** Shown next to the label, e.g. "(starts with sbp_)". */
+  tokenHint?: string;
+  placeholder?: string;
+  /** Where the user creates the token. */
+  createUrl: string;
+  steps: string[];
+  /** Exact permission names to grant, shown as chips. */
+  permissions?: string[];
+  /** Shown when the provider's tokens can do more than read. */
+  warning?: string;
+}
+
 export interface ProviderAdapter {
   id: ProviderId;
   name: string;
@@ -203,6 +219,8 @@ export interface ProviderAdapter {
   planAllowances: PlanAllowance[];
   /** Recommended next action per metric, shown in alerts. */
   recommendations: Record<string, string>;
+  /** Present when users can connect by pasting a token on the generic connect page. */
+  tokenConnect?: TokenConnectInfo;
   /** Throws ProviderError when the credentials cannot be used. */
   validate(ctx: AdapterContext): Promise<{ identity: string; grantedScopes: string[] }>;
   discover(ctx: AdapterContext): Promise<Discovery>;

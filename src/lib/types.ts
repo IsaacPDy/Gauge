@@ -1,7 +1,7 @@
 // Shared domain vocabulary. Kept free of runtime dependencies so it can be imported by
 // the Next.js app, the background worker and unit tests alike.
 
-export type ProviderId = "supabase" | "cloudflare" | "firebase" | "aws" | "demo";
+export type ProviderId = "supabase" | "cloudflare" | "firebase" | "aws" | "vercel" | "neon" | "demo";
 
 /**
  * How a metric's values combine over time.

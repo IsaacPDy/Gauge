@@ -134,7 +134,7 @@ export function UsageTrendChart({
   );
 }
 
-const SERIES_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)"];
+const SERIES_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 
 /** Stacked daily breakdown by provider dimension (max 4 series, fixed color order). */
 export function BreakdownChart({
@@ -208,7 +208,7 @@ export function CostProjectionChart({
   height?: number;
 }) {
   const money = (v: number) => formatMoney(v, currency);
-  const series = keys.slice(0, 4);
+  const series = keys.slice(0, 5);
   // Pattern ids are document-global, so scope them to this chart instance.
   const uid = useId().replace(/:/g, "");
   return (

@@ -6,6 +6,7 @@ const PLANS: Record<string, string[]> = {
   upstash: ["payg"],
   vercel: ["hobby", "pro"],
   cloudflare: ["free", "paid"],
+  firebase: ["spark", "blaze"],
 };
 
 describe("CATALOG", () => {
@@ -62,5 +63,17 @@ describe("CATALOG", () => {
     expect(sheetFor(CATALOG, "supabase", "pro")?.label).toBe("Supabase Pro");
     expect(sheetFor(CATALOG, "supabase", "enterprise")).toBeUndefined();
     expect(computeSize(CATALOG, "small").label).toBe("Small");
+  });
+
+  it("keeps graduated tiers ascending, unbounded last, and starting at the item's unit price", () => {
+    for (const s of CATALOG.sheets) {
+      for (const i of s.items) {
+        if (!i.tiers) continue;
+        expect(i.unitPrice).toBe(i.tiers[0].unitPrice);
+        expect(i.tiers[i.tiers.length - 1].upTo).toBeNull();
+        const bounds = i.tiers.slice(0, -1).map((t) => t.upTo as number);
+        expect(bounds.every((b, k) => b > i.includedQuantity && (k === 0 || b > bounds[k - 1]))).toBe(true);
+      }
+    }
   });
 });

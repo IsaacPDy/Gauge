@@ -8,6 +8,7 @@ import { resolveStack } from "./stack";
 import { workloadMonths } from "./workload";
 
 export type { CacheVerdict, EventKind, MoneyFormat, MonthResult, Provenance, SimEvent, SimulationResult, VerdictKind } from "./project";
+export type { LimitBar, LimitState, PayFromFirstUnit } from "./limits";
 export type { LineItem } from "./price";
 
 const STALE_AFTER_DAYS = 90;
@@ -45,5 +46,5 @@ export function simulate(inputs: SimInputs, opts: { catalog?: Catalog; now?: Dat
     return [{ service, plan, label: sheet.label, version: sheet.version, verifiedAt: sheet.verifiedAt, sourceUrl: sheet.sourceUrl, stale: !(ageDays <= STALE_AFTER_DAYS) }];
   });
 
-  return { months, verdict, events: collectEvents(months, verdict, stack, inputs, catalog, opts.money), notices, provenance };
+  return { months, backend: stack.backend, verdict, events: collectEvents(months, verdict, stack, inputs, catalog, opts.money), notices, provenance };
 }

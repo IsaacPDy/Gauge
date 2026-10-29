@@ -1,6 +1,6 @@
 import { formatCount } from "../../units";
 import { graduatedCost, overageCost, round2 } from "../cost";
-import { type Catalog, type ComputeKey, computeSize, type PriceSheet, type Service, sheetFor } from "./catalog";
+import { type Catalog, type ComputeKey, computeSize, GB_PER_GIB, type PriceSheet, type Service, sheetFor } from "./catalog";
 import type { ResolvedStack } from "./stack";
 import type { MonthUsage } from "./workload";
 
@@ -21,6 +21,7 @@ export interface LineItem {
 export function enabledPlans(stack: ResolvedStack): { service: Service; plan: string }[] {
   const plans: [Service, string | null][] = [
     ["supabase", stack.supabase],
+    ["firebase", stack.firebase],
     ["upstash", stack.cache ? "payg" : null],
     ["vercel", stack.vercel],
     ["cloudflare", stack.cloudflare],
@@ -31,15 +32,31 @@ export function enabledPlans(stack: ResolvedStack): { service: Service; plan: st
 function usageFor(service: Service, u: MonthUsage, stack: ResolvedStack): Record<string, number> {
   switch (service) {
     case "supabase": {
+      const db = stack.backend === "supabase";
       const files = stack.fileStore === "supabase";
       return {
-        mau: u.mau,
-        db_disk_gb: u.dbSizeGB,
+        mau: db ? u.mau : 0,
+        db_disk_gb: db ? u.dbSizeGB : 0,
         storage_gb: files ? u.storageGB : 0,
-        egress_gb: u.supabaseEgressGB + (files ? u.fileEgressGB : 0),
-        fn_invocations: u.fnInvocations,
-        rt_peak: u.rtPeakConnections,
-        rt_messages: u.rtMessages,
+        egress_gb: (db ? u.backendEgressGB : 0) + (files ? u.fileEgressGB : 0),
+        fn_invocations: db ? u.fnInvocations : 0,
+        rt_peak: db ? u.rtPeakConnections : 0,
+        rt_messages: db ? u.rtMessages : 0,
+      };
+    }
+    case "firebase": {
+      const db = stack.backend === "firebase";
+      const files = stack.fileStore === "firebase";
+      return {
+        auth_mau: db ? u.mau : 0,
+        // Firestore bills each realtime listener update as a document read.
+        fs_reads: db ? u.reads + u.rtMessages : 0,
+        fs_writes: db ? u.writes : 0,
+        fs_storage_gib: db ? u.dbSizeGB / GB_PER_GIB : 0,
+        fs_egress_gib: db ? u.backendEgressGB / GB_PER_GIB : 0,
+        fn_invocations: db ? u.fnInvocations : 0,
+        storage_gib: files ? u.storageGB / GB_PER_GIB : 0,
+        storage_egress_gib: files ? u.fileEgressGB / GB_PER_GIB : 0,
       };
     }
     case "upstash":

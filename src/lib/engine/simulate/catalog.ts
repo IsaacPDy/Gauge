@@ -3,14 +3,18 @@
 
 import type { PriceTier } from "../cost";
 
-export type Service = "supabase" | "upstash" | "vercel" | "cloudflare";
+export type Service = "supabase" | "upstash" | "vercel" | "cloudflare" | "firebase";
 
 export const SERVICE_LABELS: Record<Service, string> = {
   supabase: "Supabase",
   upstash: "Upstash Redis",
   vercel: "Vercel",
   cloudflare: "Cloudflare",
+  firebase: "Firebase",
 };
+
+/** Google Cloud bills storage and transfer in GiB; the workload model counts GB. */
+export const GB_PER_GIB = 1.073741824;
 
 export const COMPUTE_KEYS = ["nano", "micro", "small", "medium", "large", "xl", "2xl", "4xl", "8xl", "12xl", "16xl"] as const;
 export type ComputeKey = (typeof COMPUTE_KEYS)[number];
@@ -37,7 +41,7 @@ export interface PriceItem {
   /** Price applies per this many units. */
   unitSize: number;
   billingMode: "per_unit" | "package";
-  /** Graduated tiers, ascending; the last has no bound. Replaces the single `unitPrice` rate. */
+  /** Graduated tiers, ascending; the last has no bound. Replaces the single `unitPrice` rate. Tiered items always bill per unit (`billingMode` is ignored). */
   tiers?: PriceTier[];
   note?: string;
 }
@@ -75,6 +79,7 @@ const SUPABASE_VERIFIED = "2026-10-27";
 const UPSTASH_VERIFIED = "2026-10-27";
 const VERCEL_VERIFIED = "2026-10-27";
 const CLOUDFLARE_VERIFIED = "2026-10-27";
+const FIREBASE_VERIFIED = "2026-10-28";
 
 const SUPABASE_PAID_ITEMS: PriceItem[] = [
   item("mau", "Monthly active users", "users", 100_000, 0.00325),
@@ -92,6 +97,13 @@ const R2_ITEMS: PriceItem[] = [
   { ...item("r2_class_a", "R2 Class A operations (writes)", "ops", 1_000_000, 4.5, 1_000_000), billingMode: "package" },
   { ...item("r2_class_b", "R2 Class B operations (reads)", "ops", 10_000_000, 0.36, 1_000_000, "R2 egress is free."), billingMode: "package" },
 ];
+
+const AUTH_NOTE = "With Identity Platform (email, phone, anonymous and social sign-in). SAML and OIDC users have their own, smaller quota.";
+const DAILY_NOTE = "shown per month. The free quota resets daily, so a busy day can reach it first.";
+const READS_NOTE = `50,000 a day, ${DAILY_NOTE} Realtime listener updates count as reads.`;
+const WRITES_NOTE = `20,000 a day, ${DAILY_NOTE} Deletes aren't modelled separately.`;
+const NEEDS_BLAZE = "Needs the Blaze plan.";
+const GCP_EGRESS = "Internet egress to most destinations; Asia and Australia cost more.";
 
 export const CATALOG: Catalog = {
   freeCompute: "nano",
@@ -243,6 +255,66 @@ export const CATALOG: Catalog = {
         item("requests", "Workers requests", "requests", 10_000_000, 0.3, 1_000_000),
         item("cpu_ms", "Workers CPU time", "ms", 30_000_000, 0.02, 1_000_000),
         ...R2_ITEMS,
+      ],
+    },
+    {
+      service: "firebase",
+      plan: "spark",
+      label: "Firebase Spark",
+      version: VERSION,
+      verifiedAt: FIREBASE_VERIFIED,
+      sourceUrl: "https://firebase.google.com/pricing",
+      baseFee: 0,
+      items: [
+        item("auth_mau", "Auth monthly active users", "users", 50_000, null, 1, AUTH_NOTE),
+        item("fs_reads", "Firestore document reads", "reads", 1_500_000, null, 1, READS_NOTE),
+        item("fs_writes", "Firestore document writes", "writes", 600_000, null, 1, WRITES_NOTE),
+        item("fs_storage_gib", "Firestore stored data", "GiB", 1, null),
+        item("fs_egress_gib", "Firestore network egress", "GiB", 10, null),
+        item("fn_invocations", "Cloud Functions invocations", "calls", 0, null, 1, NEEDS_BLAZE),
+        item("storage_gib", "Cloud Storage", "GiB", 0, null, 1, NEEDS_BLAZE),
+        item("storage_egress_gib", "Cloud Storage downloads", "GiB", 0, null, 1, NEEDS_BLAZE),
+      ],
+    },
+    {
+      service: "firebase",
+      plan: "blaze",
+      label: "Firebase Blaze",
+      version: VERSION,
+      verifiedAt: FIREBASE_VERIFIED,
+      sourceUrl: "https://firebase.google.com/pricing",
+      baseFee: 0,
+      items: [
+        {
+          ...item("auth_mau", "Auth monthly active users", "users", 50_000, 0.0055, 1, AUTH_NOTE),
+          tiers: [
+            { upTo: 100_000, unitPrice: 0.0055 },
+            { upTo: 1_000_000, unitPrice: 0.0046 },
+            { upTo: 10_000_000, unitPrice: 0.0032 },
+            { upTo: null, unitPrice: 0.0025 },
+          ],
+        },
+        item("fs_reads", "Firestore document reads", "reads", 1_500_000, 0.03, 100_000, `Rate in us-central1. ${READS_NOTE}`),
+        item("fs_writes", "Firestore document writes", "writes", 600_000, 0.09, 100_000, `Rate in us-central1. ${WRITES_NOTE}`),
+        item("fs_storage_gib", "Firestore stored data", "GiB", 1, 0.15, 1, "Rate in us-central1, per GiB-month."),
+        {
+          ...item("fs_egress_gib", "Firestore network egress", "GiB", 10, 0.12, 1, GCP_EGRESS),
+          tiers: [
+            { upTo: 1_024, unitPrice: 0.12 },
+            { upTo: 10_240, unitPrice: 0.11 },
+            { upTo: null, unitPrice: 0.08 },
+          ],
+        },
+        item("fn_invocations", "Cloud Functions invocations", "calls", 2_000_000, 0.4, 1_000_000, "Invocations only. Compute time (GB-seconds, CPU-seconds) isn't modelled."),
+        item("storage_gib", "Cloud Storage", "GiB", 5, 0.02, 1, "Standard storage in us-central1. The free 5 GB applies only in us-central1, us-west1 and us-east1."),
+        {
+          ...item("storage_egress_gib", "Cloud Storage downloads", "GiB", 100, 0.12, 1, GCP_EGRESS),
+          tiers: [
+            { upTo: 10_240, unitPrice: 0.12 },
+            { upTo: 153_600, unitPrice: 0.11 },
+            { upTo: null, unitPrice: 0.08 },
+          ],
+        },
       ],
     },
   ],
