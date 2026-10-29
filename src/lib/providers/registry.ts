@@ -1,6 +1,9 @@
 import type { MetricDefinition, PricingRule, ProviderId } from "../types";
 import { demoAdapter } from "./demo/adapter";
+import { cloudflareAdapter } from "./cloudflare/adapter";
+import { neonAdapter } from "./neon/adapter";
 import { supabaseAdapter } from "./supabase/adapter";
+import { vercelAdapter } from "./vercel/adapter";
 import type { ProviderAdapter } from "./types";
 
 export function demoEnabled(): boolean {
@@ -9,6 +12,9 @@ export function demoEnabled(): boolean {
 
 const ADAPTERS: Partial<Record<ProviderId, ProviderAdapter>> = {
   supabase: supabaseAdapter,
+  neon: neonAdapter,
+  cloudflare: cloudflareAdapter,
+  vercel: vercelAdapter,
   demo: demoAdapter,
 };
 
@@ -53,7 +59,7 @@ export const PROVIDER_CATALOG: CatalogEntry[] = [
     id: "neon",
     name: "Neon",
     category: "database",
-    available: false,
+    available: true,
     description: "Compute hours, storage, data written and branches per project.",
   },
   {
@@ -67,14 +73,14 @@ export const PROVIDER_CATALOG: CatalogEntry[] = [
     id: "vercel",
     name: "Vercel",
     category: "hosting",
-    available: false,
+    available: true,
     description: "Function invocations, edge requests, data transfer, build minutes and billing charges.",
   },
   {
     id: "cloudflare",
     name: "Cloudflare",
     category: "hosting",
-    available: false,
+    available: true,
     description: "Workers requests and CPU time, R2 storage and operations, D1 rows, KV operations.",
   },
   {
@@ -120,6 +126,17 @@ export const PROVIDER_NAMES: Record<string, string> = {
   ...Object.fromEntries(PROVIDER_CATALOG.map((p) => [p.id, p.name])),
   demo: "Demo Cloud",
 };
+
+/**
+ * The adapter for a provider the user may connect with a pasted token: it must be
+ * available in the catalog and accept token auth. Null otherwise (including demo).
+ */
+export function tokenProvider(id: string): ProviderAdapter | null {
+  const adapter = getAdapter(id);
+  const listed = PROVIDER_CATALOG.find((p) => p.id === id);
+  if (!adapter || !listed?.available || !adapter.authMethods.includes("token")) return null;
+  return adapter;
+}
 
 const allAdapters = () => Object.values(ADAPTERS) as ProviderAdapter[];
 
