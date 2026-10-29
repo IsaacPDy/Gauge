@@ -113,7 +113,9 @@ Provider APIs ──▶ Adapters (src/lib/providers) ──▶ Sync job (jobs/sy
 
 ### Cost simulator
 
-`/simulator` estimates monthly costs for a workload you describe, without reading any connected account. Pick a preset, turn on the services in your stack (Supabase, Upstash Redis, Vercel, Cloudflare), and set where the API runs and where files live. Then adjust users, traffic, database queries, data sizes and growth.
+`/simulator` estimates monthly costs for a workload you describe, without reading any connected account. Pick a preset, turn on the services in your stack (Supabase, Firebase, Upstash Redis, Vercel, Cloudflare), and set where the API runs and where files live. Then adjust users, traffic, database queries, data sizes and growth.
+
+The **Plan limits** card shows, for each service you turn on, how close the simulated month is to every plan allowance, the month you pass it, and what you pay beyond it. **Compare plans** (`/simulator/compare`) uses the same inputs and URL to lay out every plan side by side by role (backend: Supabase or Firebase; API hosting: Vercel or Cloudflare; cache: Upstash), marking the cheapest plan that fits. Firebase Spark and Blaze are priced: Auth MAU, Firestore reads, writes, storage and egress, Cloud Functions invocations and Cloud Storage.
 
 - **Engine.** `src/lib/engine/simulate/` is pure and deterministic: inputs → resolved stack → monthly usage → priced line items → a 12-month projection with events.
 - **Cache vs. compute.** Every month is priced both with and without a cache in front of the database. The verdict says whether a cache saves money (in compute size or Supabase egress), or whether a larger compute size is cheaper. Supabase doesn't publish query throughput, so the planning QPS per compute size is an editable assumption.
@@ -156,7 +158,7 @@ Verified on 2026-10-09 against the Management API OpenAPI spec and the "Manage y
 
 - **Engine**: cycles, aggregation, forecasting (including reset boundaries and reproducibility), costs, alert dedupe keys, health, units, and failure backoff.
 - **Supabase adapter**: mocked API covering parsing, per-metric failures, auth aborts, paused projects, retries and rate limits.
-- **Cost simulator**: price catalog structure, URL encoding and presets, stack routing, the workload model, pricing and unit conversions, compute choice and the cache verdict, events, and every preset against the real catalog.
+- **Cost simulator**: price catalog structure, URL encoding and presets, stack routing (including the Supabase/Firebase backend), the workload model, pricing, graduated tiers and unit conversions, compute choice and the cache verdict, events, plan limit bars, the plan comparison, and every preset against the real catalog.
 - **Database** (needs `DATABASE_URL_TEST`): schema parity with the migrations, workspace bootstrap, and workspace isolation of the repositories. They run on the Neon branch in `DATABASE_URL_TEST`, which may be the same as the dev branch; they create and delete their own random test users and leave other data alone.
 
 While the tests run, do not run `npm run worker` or set `RUN_SCHEDULER_IN_PROCESS=true`: the scheduler would process the test data. If the dev branch holds data you care about, point `DATABASE_URL_TEST` at a separate Neon branch.
