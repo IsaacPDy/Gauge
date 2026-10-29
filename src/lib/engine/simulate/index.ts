@@ -8,6 +8,7 @@ import { resolveStack } from "./stack";
 import { workloadMonths } from "./workload";
 
 export type { CacheVerdict, EventKind, MoneyFormat, MonthResult, Provenance, SimEvent, SimulationResult, VerdictKind } from "./project";
+export type { LimitBar, LimitState, PayFromFirstUnit } from "./limits";
 export type { LineItem } from "./price";
 
 const STALE_AFTER_DAYS = 90;
