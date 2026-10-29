@@ -54,7 +54,10 @@ export function LimitBarRow({ bar, month }: { bar: LimitBar; month: number }) {
       </div>
       {badge ? (
         <div>
-          <Badge tone={badge.tone}>{badge.text}</Badge>
+          {/* Badges are nowrap by default; these are long enough to need wrapping in a narrow plan card. */}
+          <Badge tone={badge.tone} className="whitespace-normal!">
+            {badge.text}
+          </Badge>
         </div>
       ) : null}
     </li>

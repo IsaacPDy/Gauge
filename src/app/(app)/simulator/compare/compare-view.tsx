@@ -79,12 +79,13 @@ export function CompareView({ initialNotices, now }: { initialNotices: string[];
           return (
             <Card key={role.key}>
               <CardHeader title={role.label} description={role.description} />
-              <CardBody className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+              {/* Sized by the room the card gets, not the viewport: beside the form at lg it is much narrower. */}
+              <CardBody className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))] gap-4">
                 {own.map((v) => (
                   <PlanCard key={`${v.service}:${v.plan}`} variant={v} best={v === best} month={month} />
                 ))}
                 {role.key === "backend" && sim.inputs.cache !== "off" ? (
-                  <p className="text-xs text-muted md:col-span-2 2xl:col-span-3">
+                  <p className="col-span-full text-xs text-muted">
                     Supabase plans include your cache&apos;s effect on database load; the cache itself is priced under Cache.
                   </p>
                 ) : null}
