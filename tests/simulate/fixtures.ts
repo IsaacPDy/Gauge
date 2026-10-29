@@ -69,7 +69,7 @@ export const FREE_CACHE_CATALOG: Catalog = {
 export function zeroUsage(overrides: Partial<MonthUsage> = {}): MonthUsage {
   return {
     month: 1, mau: 0, dau: 0, requests: 0, dbQueries: 0, reads: 0, writes: 0, cacheHits: 0, dbHits: 0,
-    avgDbQps: 0, peakDbQps: 0, peakConnections: 0, apiEgressGB: 0, hostEgressGB: 0, supabaseEgressGB: 0,
+    avgDbQps: 0, peakDbQps: 0, peakConnections: 0, apiEgressGB: 0, hostEgressGB: 0, backendEgressGB: 0,
     fileEgressGB: 0, dbSizeGB: 0, storageGB: 0, storageAddedGB: 0, fnInvocations: 0, rtPeakConnections: 0,
     rtMessages: 0, serverRequests: 0, cpuMs: 0, cacheCommands: 0, cacheStorageGB: 0, cacheKeys: 0,
     fileWrites: 0, fileReads: 0,

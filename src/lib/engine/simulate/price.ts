@@ -36,7 +36,7 @@ function usageFor(service: Service, u: MonthUsage, stack: ResolvedStack): Record
         mau: u.mau,
         db_disk_gb: u.dbSizeGB,
         storage_gb: files ? u.storageGB : 0,
-        egress_gb: u.supabaseEgressGB + (files ? u.fileEgressGB : 0),
+        egress_gb: u.backendEgressGB + (files ? u.fileEgressGB : 0),
         fn_invocations: u.fnInvocations,
         rt_peak: u.rtPeakConnections,
         rt_messages: u.rtMessages,

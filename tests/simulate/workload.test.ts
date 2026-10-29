@@ -18,7 +18,7 @@ describe("workloadMonths", () => {
     expect(m1.peakConnections).toBeCloseTo(0.05);
     expect(m1.apiEgressGB).toBeCloseTo(60);
     expect(m1.hostEgressGB).toBeCloseTo(60);
-    expect(m1.supabaseEgressGB).toBeCloseTo(21.6);
+    expect(m1.backendEgressGB).toBeCloseTo(21.6);
     expect(m1.fileEgressGB).toBeCloseTo(300);
     expect(m1.dbSizeGB).toBeCloseTo(2);
     expect(m1.storageGB).toBeCloseTo(200);
@@ -41,7 +41,7 @@ describe("workloadMonths", () => {
     expect(m1.dbHits).toBe(m1.dbQueries);
     expect(m1.cacheCommands).toBe(0);
     expect(m1.cacheStorageGB).toBe(0);
-    expect(m1.supabaseEgressGB).toBeCloseTo(60);
+    expect(m1.backendEgressGB).toBeCloseTo(60);
   });
 
   it("compounds growth and accumulates stored data", () => {
@@ -68,7 +68,7 @@ describe("workloadMonths", () => {
   it("bills all API egress to Supabase when the client calls it directly", () => {
     const inputs = inputsWith({ host: "direct" });
     const [m1] = workloadMonths(inputs, stackWith({ host: "direct" }), false, 1);
-    expect(m1.supabaseEgressGB).toBeCloseTo(60);
+    expect(m1.backendEgressGB).toBeCloseTo(60);
     expect(m1.hostEgressGB).toBe(0);
     expect(m1.serverRequests).toBe(0);
     expect(m1.cpuMs).toBe(0);
@@ -82,6 +82,6 @@ describe("workloadMonths", () => {
 
   it("returns zero egress share, never NaN, without DB queries", () => {
     const [m1] = workloadMonths(inputsWith({ queriesPerRequest: 0 }), stackWith(), false, 1);
-    expect(m1.supabaseEgressGB).toBe(0);
+    expect(m1.backendEgressGB).toBe(0);
   });
 });

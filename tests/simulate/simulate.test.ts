@@ -41,6 +41,10 @@ describe("simulate", () => {
     const later = simulate(inputsWith(), { catalog: TEST_CATALOG, now: new Date("2027-02-01T00:00:00Z") });
     expect(later.provenance.every((p) => p.stale)).toBe(true);
   });
+  it("reports which backend holds the database", () => {
+    expect(run(inputsWith()).backend).toBe("supabase");
+    expect(run(inputsWith({ supabase: "off" })).backend).toBeNull();
+  });
 });
 
 describe("events", () => {

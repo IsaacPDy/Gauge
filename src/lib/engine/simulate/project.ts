@@ -2,9 +2,9 @@ import { formatMoney } from "../../units";
 import { round2 } from "../cost";
 import { type Catalog, type ComputeKey, type ComputeSize, computeSize, type Service, sheetFor } from "./catalog";
 import { formatAmount, formatQps } from "./format";
-import type { SimInputs } from "./inputs";
+import type { Backend, SimInputs } from "./inputs";
 import { enabledPlans, type LineItem, priceMonth } from "./price";
-import { DIRECT_REASON, NO_SUPABASE_REASON, type ResolvedStack } from "./stack";
+import { DIRECT_REASON, FIREBASE_BACKEND_REASON, NO_SUPABASE_REASON, type ResolvedStack } from "./stack";
 import { type MonthUsage, workloadMonths } from "./workload";
 
 export type VerdictKind = "add_cache" | "no_cache_needed" | "upgrade_compute" | "no_tier_fits" | "not_applicable";
@@ -39,6 +39,8 @@ function smallestFit(sizes: ComputeSize[], u: MonthUsage, inputs: SimInputs): Co
 export function chooseCompute(stack: ResolvedStack, u: MonthUsage, inputs: SimInputs, catalog: Catalog): { key: ComputeKey | null; fits: boolean } {
   const sizes = sizesFor(stack, catalog);
   if (sizes.length === 0) return { key: null, fits: true };
+  // Supabase only holds files here, so no database load reaches it.
+  if (stack.backend !== "supabase") return { key: sizes[0].key, fits: true };
   if (stack.supabase !== "free" && stack.compute !== "auto") {
     const chosen = sizes.find((s) => s.key === stack.compute) ?? sizes[0];
     return { key: chosen.key, fits: fits(chosen, u, inputs) };
@@ -63,7 +65,8 @@ type MonthVerdict = Omit<CacheVerdict, "paysOffMonth">;
 
 /** Compares "bigger compute, no cache" with "cache in front of the database" for each month. */
 export function cacheVerdict(inputs: SimInputs, stack: ResolvedStack, catalog: Catalog, months: number, money: MoneyFormat = usd): CacheVerdict {
-  const na = stack.supabase === null ? NO_SUPABASE_REASON : stack.host === "direct" ? DIRECT_REASON : null;
+  const na =
+    stack.backend === "firebase" ? FIREBASE_BACKEND_REASON : stack.backend === null ? NO_SUPABASE_REASON : stack.host === "direct" ? DIRECT_REASON : null;
   if (na) {
     return { kind: "not_applicable", message: na, monthlySaving: null, tierWithoutCache: null, tierWithCache: null, cacheFixesIt: null, paysOffMonth: null };
   }
@@ -170,6 +173,8 @@ export interface Provenance {
 
 export interface SimulationResult {
   months: MonthResult[];
+  /** Which service holds the database, or null with no backend on. */
+  backend: Backend | null;
   verdict: CacheVerdict;
   events: SimEvent[];
   notices: string[];

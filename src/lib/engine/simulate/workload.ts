@@ -21,8 +21,8 @@ export interface MonthUsage {
   apiEgressGB: number;
   /** API response egress billed by Vercel or Cloudflare. */
   hostEgressGB: number;
-  /** DB response egress billed by Supabase (excludes file downloads). */
-  supabaseEgressGB: number;
+  /** DB response egress billed by the backend, Supabase or Firebase (excludes file downloads). */
+  backendEgressGB: number;
   fileEgressGB: number;
   dbSizeGB: number;
   storageGB: number;
@@ -90,7 +90,7 @@ export function workloadMonths(inputs: SimInputs, stack: ResolvedStack, cacheOn:
       peakConnections: (peakDbQps * inputs.queryMs) / 1000,
       apiEgressGB,
       hostEgressGB: server ? apiEgressGB : 0,
-      supabaseEgressGB: server ? (dbQueries > 0 ? (apiEgressGB * dbHits) / dbQueries : 0) : apiEgressGB,
+      backendEgressGB: server ? (dbQueries > 0 ? (apiEgressGB * dbHits) / dbQueries : 0) : apiEgressGB,
       fileEgressGB,
       dbSizeGB,
       storageGB,

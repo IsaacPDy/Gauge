@@ -9,7 +9,7 @@ const of = <T extends { service: string }>(items: T[], service: string) => items
 
 describe("priceMonth", () => {
   it("prices Supabase Pro overage, compute and the compute credit", () => {
-    const items = priceMonth(zeroUsage({ mau: 120_000, supabaseEgressGB: 200, fileEgressGB: 100 }), stackWith(), "micro", TEST_CATALOG);
+    const items = priceMonth(zeroUsage({ mau: 120_000, backendEgressGB: 200, fileEgressGB: 100 }), stackWith(), "micro", TEST_CATALOG);
     const sb = of(items, "supabase");
     expect(sb.find((i) => i.key === "base")?.cost).toBe(25);
     expect(sb.find((i) => i.key === "compute")?.cost).toBe(10);
@@ -21,7 +21,7 @@ describe("priceMonth", () => {
 
   it("leaves file egress out of Supabase when files live in R2", () => {
     const stack = stackWith({ cloudflare: "paid", fileStore: "r2" });
-    const items = priceMonth(zeroUsage({ supabaseEgressGB: 200, fileEgressGB: 100 }), stack, "micro", TEST_CATALOG);
+    const items = priceMonth(zeroUsage({ backendEgressGB: 200, fileEgressGB: 100 }), stack, "micro", TEST_CATALOG);
     expect(items.find((i) => i.service === "supabase" && i.key === "egress_gb")?.usage).toBe(200);
   });
 

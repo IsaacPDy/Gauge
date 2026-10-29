@@ -45,5 +45,5 @@ export function simulate(inputs: SimInputs, opts: { catalog?: Catalog; now?: Dat
     return [{ service, plan, label: sheet.label, version: sheet.version, verifiedAt: sheet.verifiedAt, sourceUrl: sheet.sourceUrl, stale: !(ageDays <= STALE_AFTER_DAYS) }];
   });
 
-  return { months, verdict, events: collectEvents(months, verdict, stack, inputs, catalog, opts.money), notices, provenance };
+  return { months, backend: stack.backend, verdict, events: collectEvents(months, verdict, stack, inputs, catalog, opts.money), notices, provenance };
 }
