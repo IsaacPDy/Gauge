@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatUsdAs } from "@/lib/currency";
 import { simulate } from "@/lib/engine/simulate";
+import { CATALOG } from "@/lib/engine/simulate/catalog";
 import { PRESETS, presetInputs, type SimInputs } from "@/lib/engine/simulate/inputs";
 import { FREE_CACHE_CATALOG, inputsWith, TEST_CATALOG } from "./fixtures";
 
@@ -67,6 +68,14 @@ describe("events", () => {
     const mau = r.events.filter((e) => e.key === "limit:supabase:mau");
     expect(mau).toHaveLength(1);
     expect(mau[0]).toMatchObject({ month: 3, kind: "plan_limit", service: "supabase" });
+  });
+
+  it("says when the plan doesn't offer an item at all", () => {
+    const inputs = inputsWith({ supabase: "off", firebase: "spark", functionPct: 5 });
+    const fn = (catalog = TEST_CATALOG) => run(inputs, catalog).events.find((e) => e.key === "limit:firebase:fn_invocations");
+    // TEST_CATALOG labels items by key; the real catalog has the display label.
+    expect(fn()).toMatchObject({ kind: "plan_limit", service: "firebase", message: "fn_invocations aren't available on this plan. A paid plan is required." });
+    expect(fn(CATALOG)?.message).toBe("Cloud Functions invocations aren't available on this plan. A paid plan is required.");
   });
 
   it("fires when overage charges start on a paid plan", () => {

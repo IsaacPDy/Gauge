@@ -218,7 +218,10 @@ export function collectEvents(
           month: m.month,
           kind: "plan_limit",
           service: item.service,
-          message: `Over the plan limit for ${item.label} (${included} included). A paid plan is required.`,
+          message:
+            item.included === 0
+              ? `${item.label} aren't available on this plan. A paid plan is required.`
+              : `Over the plan limit for ${item.label} (${included} included). A paid plan is required.`,
         });
       } else if (item.included > 0 && item.billable > 0 && item.cost > 0 && !creditCovers(item.service, item.key)) {
         const key = `overage:${item.service}:${item.key}`;
