@@ -29,7 +29,7 @@ describe("limitBars", () => {
 
   it("is blocked past the limit of a free plan", () => {
     const [bar] = limitBars(result([li("x", 150, 100, { restricted: true })]), 1).bars;
-    expect(bar).toMatchObject({ state: "blocked", overageCost: 0, notOnPlan: false });
+    expect(bar).toMatchObject({ pct: 150, state: "blocked", overageCost: 0, hitsLimitMonth: 1, notOnPlan: false });
   });
 
   it("finds the first month the limit is passed", () => {

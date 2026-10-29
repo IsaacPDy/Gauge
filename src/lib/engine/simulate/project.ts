@@ -220,7 +220,7 @@ export function collectEvents(
           service: item.service,
           message:
             item.included === 0
-              ? `${item.label} aren't available on this plan. A paid plan is required.`
+              ? `This plan doesn't include ${item.label}. A paid plan is required.`
               : `Over the plan limit for ${item.label} (${included} included). A paid plan is required.`,
         });
       } else if (item.included > 0 && item.billable > 0 && item.cost > 0 && !creditCovers(item.service, item.key)) {

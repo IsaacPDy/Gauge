@@ -71,11 +71,14 @@ describe("events", () => {
   });
 
   it("says when the plan doesn't offer an item at all", () => {
-    const inputs = inputsWith({ supabase: "off", firebase: "spark", functionPct: 5 });
-    const fn = (catalog = TEST_CATALOG) => run(inputs, catalog).events.find((e) => e.key === "limit:firebase:fn_invocations");
+    const inputs = inputsWith({ supabase: "off", firebase: "spark", fileStore: "firebase", functionPct: 5, fileMBPerUser: 20, fileDownloadMBPerUser: 30 });
+    const message = (key: string, catalog = TEST_CATALOG) => run(inputs, catalog).events.find((e) => e.key === `limit:firebase:${key}`)?.message;
     // TEST_CATALOG labels items by key; the real catalog has the display label.
-    expect(fn()).toMatchObject({ kind: "plan_limit", service: "firebase", message: "fn_invocations aren't available on this plan. A paid plan is required." });
-    expect(fn(CATALOG)?.message).toBe("Cloud Functions invocations aren't available on this plan. A paid plan is required.");
+    expect(run(inputs).events.find((e) => e.key === "limit:firebase:fn_invocations")).toMatchObject({ kind: "plan_limit", service: "firebase" });
+    expect(message("fn_invocations")).toBe("This plan doesn't include fn_invocations. A paid plan is required.");
+    expect(message("fn_invocations", CATALOG)).toBe("This plan doesn't include Cloud Functions invocations. A paid plan is required.");
+    expect(message("storage_gib", CATALOG)).toBe("This plan doesn't include Cloud Storage. A paid plan is required.");
+    expect(message("storage_egress_gib", CATALOG)).toBe("This plan doesn't include Cloud Storage downloads. A paid plan is required.");
   });
 
   it("fires when overage charges start on a paid plan", () => {
