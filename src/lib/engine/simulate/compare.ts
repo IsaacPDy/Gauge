@@ -1,3 +1,4 @@
+import { round2 } from "../cost";
 import { CATALOG, type Catalog, type Service, sheetFor } from "./catalog";
 import { simulate } from "./index";
 import type { CloudflareChoice, FirebaseChoice, SimInputs, SupabaseChoice, VercelChoice } from "./inputs";
@@ -8,7 +9,7 @@ export type Role = "backend" | "hosting" | "cache";
 
 export const ROLES: { key: Role; label: string; description: string }[] = [
   { key: "backend", label: "Backend", description: "Database, auth, files, functions and realtime." },
-  { key: "hosting", label: "API hosting", description: "Where your API runs." },
+  { key: "hosting", label: "API hosting", description: "Where your API runs. R2 file storage isn't counted here." },
   { key: "cache", label: "Cache", description: "In front of a Supabase database." },
 ];
 
@@ -34,7 +35,9 @@ export interface PlanVariant {
   total: number;
   bars: LimitBar[];
   payFromFirst: PayFromFirstUnit[];
-  /** Some usage passes a limit this plan doesn't sell past. */
+  /** The largest compute size this plan offers carries the load; true where there's no compute to size. */
+  computeFits: boolean;
+  /** Some usage passes a limit this plan doesn't sell past, or compute can't carry the load. */
   overLimit: boolean;
   /** Why the plan can't be priced with these inputs, e.g. a cache with no Supabase database. */
   unavailable: string | null;
@@ -67,19 +70,24 @@ export function comparePlans(inputs: SimInputs, month: number, opts: { catalog?:
     const base = { role, service, plan, label: sheet.label };
     if (service === "upstash") {
       const { stack } = resolveStack(vi);
-      if (!stack.cache) return [{ ...base, total: 0, bars: [], payFromFirst: [], overLimit: false, unavailable: stack.cacheBlockedReason ?? DIRECT_REASON }];
+      if (!stack.cache) return [{ ...base, total: 0, bars: [], payFromFirst: [], computeFits: true, overLimit: false, unavailable: stack.cacheBlockedReason ?? DIRECT_REASON }];
     }
     const result = simulate(vi, { catalog, now: opts.now });
-    const selected = result.months[month - 1] ?? result.months[0];
-    const limits = limitBars(result, month);
-    const bars = limits.bars.filter((b) => b.service === service);
+    const m = Math.min(Math.max(1, month), result.months.length);
+    const selected = result.months[m - 1];
+    // R2 is file storage, billed on the Cloudflare account; it isn't part of what hosting the API costs.
+    const counted = (it: { service: Service; key: string }) => it.service === service && !(role === "hosting" && it.key.startsWith("r2_"));
+    const limits = limitBars(result, m);
+    const bars = limits.bars.filter(counted);
+    const computeFits = selected?.computeFits ?? true;
     return [
       {
         ...base,
-        total: selected?.totalsByService[service] ?? 0,
+        total: round2((selected?.items ?? []).filter(counted).reduce((s, i) => s + i.cost, 0)),
         bars,
-        payFromFirst: limits.payFromFirst.filter((p) => p.service === service),
-        overLimit: bars.some((b) => b.state === "blocked"),
+        payFromFirst: limits.payFromFirst.filter(counted),
+        computeFits,
+        overLimit: !computeFits || bars.some((b) => b.state === "blocked"),
         unavailable: null,
       },
     ];

@@ -60,6 +60,37 @@ describe("comparePlans", () => {
     expect(comparePlans(inputs, 1, { catalog: TEST_CATALOG, now: NOW }).notices).toEqual(resolveStack(inputs).notices);
   });
 
+  it("counts a plan whose compute can't carry the load as over its limit", () => {
+    // ~77 q/s on average with no peak: past Nano at 70% headroom (35 q/s), within Small (140 q/s).
+    const { variants } = compare({ dbQueriesOverride: 200_000_000, peakToAvg: 1, growthPct: 0 });
+    expect(find(variants, "supabase", "free")).toMatchObject({ computeFits: false, overLimit: true });
+    expect(find(variants, "supabase", "pro")).toMatchObject({ computeFits: true, overLimit: false });
+    expect(cheapestThatFits(variants.filter((v) => v.role === "backend"))?.plan).not.toBe("free");
+  });
+
+  it("says compute fits for services without compute sizes and for plans it can't price", () => {
+    const { variants } = compare({ host: "direct" });
+    expect(find(variants, "vercel", "pro").computeFits).toBe(true);
+    expect(find(variants, "upstash", "payg").computeFits).toBe(true);
+  });
+
+  it("leaves R2 file storage out of API hosting", () => {
+    const o = { cloudflare: "paid", fileStore: "r2" } as const;
+    const v = find(compare(o).variants, "cloudflare", "paid");
+    const direct = simulate(inputsWith({ ...o, host: "cloudflare" }), { catalog: TEST_CATALOG, now: NOW }).months[0];
+    const r2 = direct.items.filter((i) => i.service === "cloudflare" && i.key.startsWith("r2_"));
+    expect(r2.length).toBeGreaterThan(0);
+    expect(v.bars.some((b) => b.key.startsWith("r2_"))).toBe(false);
+    expect(v.payFromFirst.some((p) => p.key.startsWith("r2_"))).toBe(false);
+    expect(v.total).toBeCloseTo(direct.totalsByService.cloudflare! - r2.reduce((s, i) => s + i.cost, 0), 2);
+  });
+
+  it("shows the last month for a month past the projection", () => {
+    const mau = (month: number) => find(compare({ growthPct: 50 }, month).variants, "supabase", "pro").bars.find((b) => b.key === "mau")!.used;
+    expect(mau(13)).toBe(mau(12));
+    expect(mau(13)).toBeGreaterThan(mau(1));
+  });
+
   it("reads the requested month", () => {
     const m1 = find(compare({ growthPct: 50 }, 1).variants, "supabase", "pro");
     const m6 = find(compare({ growthPct: 50 }, 6).variants, "supabase", "pro");
@@ -69,7 +100,7 @@ describe("comparePlans", () => {
 
 describe("cheapestThatFits", () => {
   const v = (plan: string, total: number, extra: Partial<PlanVariant> = {}): PlanVariant => ({
-    role: "backend", service: "supabase", plan, label: plan, total, bars: [], payFromFirst: [], overLimit: false, unavailable: null, ...extra,
+    role: "backend", service: "supabase", plan, label: plan, total, bars: [], payFromFirst: [], computeFits: true, overLimit: false, unavailable: null, ...extra,
   });
 
   it("picks the lowest total among plans that fit, the first on a tie", () => {
